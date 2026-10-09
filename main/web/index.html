@@ -65,7 +65,8 @@ let currentProfile = -1;
 const profiles = [
   ['', '', ''], ['BOMB', '', 'MOVE'], ['BOOST', '', 'TURN'],
   ['ITEM', 'DRIFT', 'LEFT / RIGHT: STEER'], ['KICK', 'SPRINT', 'MOVE'],
-  ['ROTATE', 'DROP', 'LEFT / RIGHT: MOVE'], ['FIRE', 'STRAFE', 'STICK: MOVE + TURN']
+  ['ROTATE', 'DROP', 'LEFT / RIGHT: MOVE'], ['FIRE', 'STRAFE', 'STICK: MOVE + TURN'],
+  ['RESUME', 'QUIT', 'PAUSED'], ['AGAIN', 'MENU', 'ROUND OVER'], ['NEXT', 'MENU', 'PARTY CUP']
 ];
 function show(p, profile = 0, color) {
   if (profile !== currentProfile) {
@@ -84,7 +85,7 @@ function connect() {
   ws.binaryType = 'arraybuffer';
   ws.onopen = send;
   ws.onmessage = e => { const r = new Uint8Array(e.data); show(r[0], r[1] || 0, r.length >= 4 ? r[2] | (r[3] << 8) : undefined); };
-  ws.onclose = () => { show(-1); setTimeout(connect, 1000); };
+  ws.onclose = () => { releaseControls(); show(-1); setTimeout(connect, 1000); };
 }
 connect();
 setInterval(send, 100);

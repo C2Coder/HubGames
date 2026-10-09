@@ -86,6 +86,13 @@ static input_t in[MAX_PLAYERS];
 
 static void start_game(void);
 
+static controller_profile_t game_controller(void)
+{
+    return game == &game_bomber ? CONTROL_BOMBER : game == &game_tron ? CONTROL_TRON :
+        game == &game_racers ? CONTROL_RACERS : game == &game_football ? CONTROL_FOOTBALL :
+        game == &game_towers ? CONTROL_TOWERS : game == &game_fps ? CONTROL_FPS : CONTROL_DEFAULT;
+}
+
 static void set_state(int s)
 {
     if (s == S_RESULT && cup_active) {
@@ -95,6 +102,8 @@ static void set_state(int s)
     state = s;
     if (s == S_MAIN || s == S_GAMES) cup_active = false;
     if (s == S_MAIN || s == S_GAMES) net_set_controller(CONTROL_DEFAULT);
+    else if (s == S_PAUSE) net_set_controller(CONTROL_PAUSE);
+    else if (s == S_RESULT) net_set_controller(cup_active && cup_round < CUP_ROUNDS ? CONTROL_NEXT : CONTROL_RESULT);
     fade = 0;
     timer = 0;
     bar_y = -1;
@@ -424,9 +433,7 @@ static void start_game(void)
             n_inst++;
         }
     }
-    net_set_controller(game == &game_bomber ? CONTROL_BOMBER : game == &game_tron ? CONTROL_TRON :
-        game == &game_racers ? CONTROL_RACERS : game == &game_football ? CONTROL_FOOTBALL :
-        game == &game_towers ? CONTROL_TOWERS : game == &game_fps ? CONTROL_FPS : CONTROL_DEFAULT);
+    net_set_controller(game_controller());
     won = false;
     winners = 0;
     set_state(S_COUNTDOWN);
@@ -549,6 +556,7 @@ static void pause_screen(void)
 {
     uint8_t pressed = pressed_any(players);
     if ((pressed & (BTN_A | BTN_START)) && players_ok()) {
+        net_set_controller(game_controller());
         state = S_PLAY;
         return;
     }
