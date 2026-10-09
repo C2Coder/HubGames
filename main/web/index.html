@@ -23,6 +23,10 @@ html, body { height: 100%; background: #111; color: #eee; font-family: sans-seri
 .r { position: absolute; width: 23vh; height: 23vh; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9vh; font-weight: bold; color: #fff; }
 #a { right: 0; top: 2vh; background: #b22; }
 #b { left: 0; bottom: 2vh; background: #c80; }
+#doompad { display: grid; grid-template-columns: 19vh 26vh 19vh; grid-template-rows: 26vh 14vh; gap: 2vh; align-items: center; }
+#fire { height: 26vh; border-radius: 50%; background: #b22; color: #fff; font-size: 6vh; font-weight: bold; }
+#use { grid-column: 2; height: 12vh; background: #c80; color: #fff; font-size: 5vh; }
+.turn { height: 19vh; }
 #rot { display: none; height: 100%; align-items: center; justify-content: center; font-size: 6vw; color: #888; }
 @media (orientation: portrait) { #rot { display: flex; } #bar, #pad { display: none; } }
 </style>
@@ -39,7 +43,13 @@ html, body { height: 100%; background: #111; color: #eee; font-family: sans-seri
       <div></div><div class="k" data-b="down">&#9660;</div><div></div>
     </div>
   </div>
-  <div id="right"><div id="ab"><div id="a" class="r" data-b="a">A</div><div id="b" class="r" data-b="b">B</div></div></div>
+  <div id="right">
+    <div id="ab"><div id="a" class="r" data-b="a">A</div><div id="b" class="r" data-b="b">B</div></div>
+    <div id="doompad" class="hide">
+      <div class="k turn" data-b="left">&#9664;</div><div id="fire" class="k" data-b="a">FIRE</div><div class="k turn" data-b="right">&#9654;</div>
+      <div id="use" class="k" data-b="b">USE</div>
+    </div>
+  </div>
 </div>
 <script>
 const BITS = { up: 1, down: 2, left: 4, right: 8, a: 16, b: 32, start: 64 };
@@ -85,6 +95,7 @@ let jid = null;
 function jmove(e) {
   const r = joy.getBoundingClientRect(), R = r.width / 2;
   let x = e.clientX - r.left - R, y = e.clientY - r.top - R;
+  if (layout === 'doom') x = 0; // only forward / back
   const d = Math.hypot(x, y);
   if (d > R) { x *= R / d; y *= R / d; }
   knob.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
@@ -105,18 +116,24 @@ joy.addEventListener('pointermove', e => { if (e.pointerId === jid) jmove(e); })
 joy.addEventListener('pointerup', jend);
 joy.addEventListener('pointercancel', jend);
 
-// joystick or arrows, remembered per phone
+// layout: joystick, arrows, or doom (stick forward/back, turn arrows + fire),
+// remembered per phone
+const LAYOUTS = ['stick', 'arrows', 'doom'];
 const swap = document.getElementById('swap'), dpad = document.getElementById('dpad');
-function setArrows(on) {
-  joy.classList.toggle('hide', on);
-  dpad.classList.toggle('hide', !on);
-  swap.textContent = on ? 'STICK' : 'ARROWS';
-  try { localStorage.setItem('arrows', on ? '1' : ''); } catch (e) {}
+const ab = document.getElementById('ab'), doompad = document.getElementById('doompad');
+let layout = 'stick';
+function setLayout(l) {
+  layout = l;
+  joy.classList.toggle('hide', l === 'arrows');
+  dpad.classList.toggle('hide', l !== 'arrows');
+  ab.classList.toggle('hide', l === 'doom');
+  doompad.classList.toggle('hide', l !== 'doom');
+  swap.textContent = l.toUpperCase();
+  try { localStorage.setItem('layout', l); } catch (e) {}
 }
-let arrows = false;
-try { arrows = !!localStorage.getItem('arrows'); } catch (e) {}
-setArrows(arrows);
-swap.addEventListener('click', () => { arrows = !arrows; setArrows(arrows); });
+try { layout = localStorage.getItem('layout') || (localStorage.getItem('arrows') ? 'arrows' : 'stick'); } catch (e) {}
+setLayout(LAYOUTS.includes(layout) ? layout : 'stick');
+swap.addEventListener('click', () => setLayout(LAYOUTS[(LAYOUTS.indexOf(layout) + 1) % LAYOUTS.length]));
 </script>
 </body>
 </html>
