@@ -11,7 +11,7 @@
 #define HUD       6
 #define COLS      32
 #define MAX_ROWS  30
-#define NT        MAX_PLAYERS   // tanks: 4 players, or player + 5 AI
+#define NT        MAX_PLAYERS // tanks: one per player slot (up to 8 play), or player + 5 AI
 #define NB        32  // bullets
 #define TS        5   // tank size in px
 #define PROT_T    50  // spawn protection, ticks
@@ -742,8 +742,7 @@ static player_mask_t winners(const void *p)
 
 const game_t game_tanks = {
     .shared = true,
-    .max_players = 8,
-    .opaque = true,
+    .max_players = 8, // spawn spots
     .big = BIG_NATIVE,
     .init = init,
     .update = update,

@@ -1,6 +1,7 @@
 #include "game.h"
 #include "settings.h"
 #include "net.h"
+#include "doom.h"
 #include "freertos/task.h"
 #include <string.h>
 #include <time.h>
@@ -13,6 +14,7 @@ uint32_t esp_random(void) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
 #ifndef TEST_NETWORK
 TickType_t xTaskGetTickCount(void) { return 0; }
 #endif
+void vTaskDelay(TickType_t d) { (void)d; }
 void vTaskDelayUntil(TickType_t *t, TickType_t d) { *t += d; }
 void xTaskCreatePinnedToCore(void (*f)(void *), const char *n, unsigned stack, void *p, unsigned pri, void *out, int c)
 { (void)f; (void)n; (void)stack; (void)p; (void)pri; (void)out; (void)c; }
@@ -29,3 +31,5 @@ void input_get(int p, input_t *in) { (void)p; memset(in, 0, sizeof(*in)); }
 #endif
 uint32_t esp_get_free_heap_size(void) { return 0; }
 uint32_t esp_get_minimum_free_heap_size(void) { return 0; }
+bool doom_available(void) { return false; }
+bool doom_run(void) { return false; }

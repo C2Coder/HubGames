@@ -4,11 +4,13 @@
 #include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_system.h"
 
 #include "ambient.h"
+#include "doom.h"
 #include "fx.h"
 #include "game.h"
 #include "gfx.h"
@@ -17,9 +19,6 @@
 #include "net.h"
 #include "settings.h"
 #include "school.h"
-#ifdef CONFIG_HUBGAMES_FULL_DOOM
-#include "doom.h"
-#endif
 
 #define FRAME_MS        20
 #define COUNTDOWN_TICKS (3000 / FRAME_MS)
@@ -50,20 +49,14 @@ static const struct {
     {"DONKEY KONG", &game_dk, M_SINGLE | M_VS},
     {"MARIO", &game_mario, M_SINGLE | M_VS},
     {"TANKS", &game_tanks, M_SINGLE | M_VS | M_PARTY},
-#ifdef CONFIG_HUBGAMES_FULL_DOOM
-    {"DOOM", NULL, M_SINGLE},
-#endif
+    {"DOOM", NULL, M_SINGLE}, // special, see games_menu
     {"BOMBER ARENA", &game_bomber, M_VS | M_PARTY},
     {"TRON", &game_tron, M_VS | M_PARTY},
     {"POCKET RACERS", &game_racers, M_VS | M_PARTY},
     {"PIXEL FOOTBALL", &game_football, M_VS | M_PARTY},
     {"TRICKY TOWERS", &game_towers, M_VS | M_PARTY},
-#ifdef CONFIG_HUBGAMES_FULL_DOOM
-    {"MICRO FPS", &game_fps, M_VS}, // singleplayer uses the full Doom engine
-#else
     {"MICRO FPS", &game_fps, M_SINGLE | M_VS},
-#endif
-    {"PARTY CUP", NULL, M_PARTY},
+    {"PARTY CUP", NULL, M_PARTY}, // special, see start_game
 };
 #define MENU_N (int)(sizeof(menu) / sizeof(menu[0]))
 
@@ -88,7 +81,8 @@ static uint16_t cup_points[MAX_PLAYERS];
 static int n_inst;
 static int inst_player[MAX_GAME_INSTANCES];
 static bool over[MAX_GAME_INSTANCES];
-static union {
+// in PSRAM, internal RAM is needed for WiFi and DMA
+static EXT_RAM_BSS_ATTR union {
     uint8_t shared[GAME_STATE_MAX];
     uint8_t panel[MAX_GAME_INSTANCES][PANEL_STATE_MAX];
 } gs_mem __attribute__((aligned(4)));
@@ -205,9 +199,9 @@ static void draw_list(const char *const *items, int n, int sel, int y0)
         gfx_text_center(64, y0 + i * pitch, scale, first + i == sel ? C_WHITE : C_GRAY, items[first + i]);
 }
 
-static void draw_players_row(int y)
+// P1-P12 in two rows at the bottom
+static void draw_players_row(void)
 {
-    (void)y;
     char name[8];
     for (int p = 0; p < MAX_PLAYERS; p++) {
         snprintf(name, sizeof(name), "P%d", p + 1);
@@ -265,7 +259,7 @@ static void main_menu(void)
     ambient_plasma(t, MENU_BG);
     int scale = text_scale();
     draw_list(main_items, MAIN_N, main_sel, scale == 2 ? 20 : 6);
-    draw_players_row(screen_h - 6 * scale);
+    draw_players_row();
 }
 
 static bool in_mode(int i)
@@ -286,17 +280,16 @@ static void games_menu(void)
 
     int n = __builtin_popcount(connected_mask());
     bool ready = mode == MODE_SINGLE || n >= 2;
-#ifdef CONFIG_HUBGAMES_FULL_DOOM
-    bool full_doom = !menu[game_sel].game && mode == MODE_SINGLE;
-    if (full_doom && (in[0].pressed & BTN_A)) {
+    bool doom = !menu[game_sel].game && mode == MODE_SINGLE;
+    if ((in[0].pressed & BTN_A) && doom) {
         if (doom_available()) {
             state = S_DOOM;
             net_set_controller(CONTROL_DOOM);
-            if (!doom_run()) set_state(S_GAMES);
+            if (!doom_run())
+                set_state(S_GAMES);
         }
         return;
     }
-#endif
     if ((in[0].pressed & BTN_A) && ready) {
         start_game();
         return;
@@ -320,12 +313,9 @@ static void games_menu(void)
 
     char buf[32];
     int y = screen_h - 6 * scale;
-#ifdef CONFIG_HUBGAMES_FULL_DOOM
-    if (full_doom) {
-        gfx_text_center(64, y, scale, C_GRAY, doom_available() ? "START = DOOM MENU" : "NO PSRAM / WAD");
-    } else
-#endif
-    if (!ready) {
+    if (doom) {
+        gfx_text_center(64, y, scale, C_GRAY, doom_available() ? "START = DOOM MENU" : "NO WAD FLASHED");
+    } else if (!ready) {
         gfx_text_center(64, y, scale, C_YELLOW, "NEED 2+ PLAYERS");
     } else if (mode != MODE_SINGLE) {
         const game_t *g = menu[game_sel].game;
@@ -631,7 +621,24 @@ static void result_screen(void)
     int big = screen_h == 128 ? 3 : 2;
     int pulse = 30 + (int)(t % 50 < 25 ? t % 25 : 25 - t % 25) * 2;
 
-    if (mode == MODE_SINGLE) {
+    if (cup_active) {
+        // party cup standings replace the round result
+        ambient_plasma(t, MENU_BG);
+        snprintf(buf, sizeof(buf), "CUP %d/%d", cup_round, CUP_ROUNDS);
+        gfx_text_center(64, 2, 2, C_WHITE, buf);
+        int best = -1, slot = 0;
+        for (int p = 0; p < MAX_PLAYERS; p++)
+            if ((cup_players & (1u << p)) && cup_points[p] > best) best = cup_points[p];
+        for (int p = 0; p < MAX_PLAYERS; p++) if (cup_players & (1u << p)) {
+            snprintf(buf, sizeof(buf), "P%d %d", p + 1, cup_points[p]);
+            int y = 19 + (slot / 4) * 9;
+            gfx_text_center(16 + (slot % 4) * 32, y, 1,
+                            cup_points[p] == best ? C_WHITE : player_color[p], buf);
+            slot++;
+        }
+        gfx_text_center(64, screen_h - 18, 1, C_YELLOW,
+                        cup_round == CUP_ROUNDS ? "FINAL STANDINGS" : "WIN 3 PTS REST 1");
+    } else if (mode == MODE_SINGLE) {
         if (won) {
             ambient_plasma(t, MENU_BG);
             region_band(0, -18, 34);
@@ -682,23 +689,6 @@ static void result_screen(void)
             slot++;
         }
     }
-    if (cup_active) {
-        ambient_plasma(t, MENU_BG);
-        snprintf(buf, sizeof(buf), "CUP %d/%d", cup_round, CUP_ROUNDS);
-        gfx_text_center(64, 2, 2, C_WHITE, buf);
-        int best = -1, slot = 0;
-        for (int p = 0; p < MAX_PLAYERS; p++)
-            if ((cup_players & (1u << p)) && cup_points[p] > best) best = cup_points[p];
-        for (int p = 0; p < MAX_PLAYERS; p++) if (cup_players & (1u << p)) {
-            snprintf(buf, sizeof(buf), "P%d %d", p + 1, cup_points[p]);
-            int y = 19 + (slot / 4) * 9;
-            gfx_text_center(16 + (slot % 4) * 32, y, 1,
-                            cup_points[p] == best ? C_WHITE : player_color[p], buf);
-            slot++;
-        }
-        gfx_text_center(64, screen_h - 18, 1, C_YELLOW,
-                        cup_round == CUP_ROUNDS ? "FINAL STANDINGS" : "WIN 3 PTS REST 1");
-    }
     if (timer > 25) {
         gfx_darken(0, screen_h - 9, HUB75_W, 9);
         gfx_text_center(64, screen_h - 7, 1, C_GRAY, cup_active && cup_round < CUP_ROUNDS ? "A NEXT   B MENU" : "A AGAIN   B MENU");
@@ -712,12 +702,10 @@ static void game_task(void *arg)
     int late = 0;
     while (1) {
         int64_t start = esp_timer_get_time();
-#ifdef CONFIG_HUBGAMES_FULL_DOOM
-        if (state == S_DOOM) {
+        if (state == S_DOOM) { // Doom draws from its own task
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
-#endif
         for (int p = 0; p < MAX_PLAYERS; p++)
             input_get(p, &in[p]);
         gfx_clear();

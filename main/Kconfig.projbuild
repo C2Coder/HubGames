@@ -1,6 +1,0 @@
-menu "HubGames"
-config HUBGAMES_FULL_DOOM
-    bool "Enable full Doom (requires octal PSRAM and a flashed WAD)"
-    depends on SPIRAM
-    default n
-endmenu

@@ -37,6 +37,16 @@ static bool fits(const towers_t *s, int pl, int x, int y, int rot)
     }
     return true;
 }
+// true if any block of the piece would leave the player's well after moving by dx
+static bool off_edge(const towers_t *s, int pl, int dx)
+{
+    for (int i = 0; i < 4; i++) {
+        int bx, by; block(s->tower[pl].kind, s->tower[pl].rot, i, &bx, &by);
+        bx += s->tower[pl].x + dx;
+        if (bx < 0 || bx >= s->width - 1) return true;
+    }
+    return false;
+}
 static void spawn(towers_t *s, int pl)
 {
     s->tower[pl].kind = esp_random() % 7; s->tower[pl].rot = 0;
@@ -73,7 +83,7 @@ static void land(towers_t *s, int pl)
         s->tower[pl].x += slide;
         return; // gravity resumes; the rigid piece slides off its narrow support
     }
-    if (slide && (s->tower[pl].x + slide < 0 || s->tower[pl].x + slide + 3 >= s->width - 1)) {
+    if (slide && off_edge(s, pl, slide)) {
         fx_burst((s->tower[pl].start + s->tower[pl].x) * CELL,
                  HUD + s->tower[pl].y * CELL, player_color[pl], 8);
         if (!--s->tower[pl].lives) s->alive &= ~(1u << pl);

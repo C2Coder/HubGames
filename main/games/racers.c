@@ -34,10 +34,12 @@ static bool road(const racers_t *s, int x, int y)
     return x >= 4 && x < 124 && y >= HUD + 1 && y < s->h - 1 &&
         !(x >= 22 && x < 106 && y >= HUD + 17 && y < s->h - 17);
 }
-static void checkpoint(const racers_t *s, int k, int *x, int *y)
+// Checkpoints are the four corner boxes, clockwise from top right. Every way
+// around the infield passes through each box, so no racing line can skip one.
+static bool at_checkpoint(const racers_t *s, int k, int x, int y)
 {
-    *x = (k == 0 || k == 1) ? 115 : 13;
-    *y = (k == 0 || k == 3) ? HUD + 9 : s->h - 9;
+    bool right = x >= 106, left = x < 22, top = y < HUD + 17, bottom = y >= s->h - 17;
+    return k == 0 ? right && top : k == 1 ? right && bottom : k == 2 ? left && bottom : left && top;
 }
 static void init(void *p, view_t v, player_mask_t players, bool versus)
 {
@@ -99,10 +101,7 @@ static game_status_t update(void *p, const input_t *in)
             s->car[pl].x = nx; s->car[pl].y = ny;
         } else s->car[pl].speed = 32;
         x = s->car[pl].x >> 8; y = s->car[pl].y >> 8;
-        int cx, cy;
-        checkpoint(s, s->car[pl].checkpoint, &cx, &cy);
-        int dx = x - cx, dy = y - cy;
-        if (dx * dx + dy * dy < 100) {
+        if (at_checkpoint(s, s->car[pl].checkpoint, x, y)) {
             if (++s->car[pl].checkpoint == 4) {
                 s->car[pl].checkpoint = 0;
                 if (++s->car[pl].lap == LAPS) s->winner |= 1u << pl;
@@ -111,9 +110,9 @@ static game_status_t update(void *p, const input_t *in)
         }
         // Item boxes on the four straight sections.
         for (int k = 0; k < 4; k++) {
-            cx = k & 1 ? (k == 1 ? 115 : 13) : 64;
-            cy = k & 1 ? (HUD + s->h) / 2 : (k == 0 ? HUD + 9 : s->h - 9);
-            dx = x - cx; dy = y - cy;
+            int cx = k & 1 ? (k == 1 ? 115 : 13) : 64;
+            int cy = k & 1 ? (HUD + s->h) / 2 : (k == 0 ? HUD + 9 : s->h - 9);
+            int dx = x - cx, dy = y - cy;
             if (!s->crate[k] && !s->car[pl].item && dx * dx + dy * dy < 36) {
                 s->car[pl].item = 1 + esp_random() % 3;
                 s->crate[k] = 180;

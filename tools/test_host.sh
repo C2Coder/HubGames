@@ -16,7 +16,13 @@ flags="-std=c11 -O2 -g -Wall -Wextra -Wno-unused-parameter -fsanitize=$sanitizer
 "$compiler" $flags -std=gnu11 -DTEST_NETWORK -Itests/stubs/net -Itests/stubs -Imain -Imain/games tests/test_net.c tests/host_support.c -o "$output_dir/test_net" -lm
 # shellcheck disable=SC2086
 "$compiler" $flags -Itests/stubs -Imain -Imain/games tests/test_tanks.c tests/host_support.c main/gfx.c main/fx.c -o "$output_dir/test_tanks" -lm
+# shellcheck disable=SC2086
+"$compiler" $flags -Itests/stubs -Imain -Imain/games tests/test_racers.c tests/host_support.c main/gfx.c main/fx.c -o "$output_dir/test_racers" -lm
+# shellcheck disable=SC2086
+"$compiler" $flags -Itests/stubs -Imain -Imain/games tests/test_towers.c tests/host_support.c main/gfx.c main/fx.c -o "$output_dir/test_towers" -lm
 "$output_dir/test_tanks"
+"$output_dir/test_racers"
+"$output_dir/test_towers"
 "$output_dir/test_net"
 "$output_dir/test_arena"
 "$output_dir/test_fps"

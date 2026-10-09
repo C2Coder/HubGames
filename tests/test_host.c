@@ -66,6 +66,11 @@ int main(int argc, char **argv)
         snprintf(path, sizeof(path), "%s/game-%d.ppm", dir, game_sel); snapshot(path);
         check_game(g, max);
     }
+    // Full Doom stays in 1 PLAYER; without a WAD, A keeps the menu open.
+    mode = MODE_SINGLE; controller_count(1);
+    for (game_sel = 0; menu[game_sel].game || strcmp(menu[game_sel].name, "DOOM"); game_sel++) assert(game_sel < MENU_N);
+    state = S_GAMES; in[0].pressed = BTN_A; games_menu(); assert(state == S_GAMES);
+    in[0].pressed = 0;
     game_sel = MENU_N - 2; mode = MODE_SINGLE; controller_count(1);
     start_game(); gfx_clear(); draw_game();
     snprintf(path, sizeof(path), "%s/fps.ppm", dir); snapshot(path);
@@ -110,7 +115,7 @@ int main(int argc, char **argv)
         }
         for (int i = 0; i < MENU_N - 1; i++) {
             game_sel = i;
-            if (menu[i].game->shared) continue;
+            if (!menu[i].game || menu[i].game->shared) continue;
             controller_count(12); mode = MODE_VS; start_game();
             assert(n_inst == (height == 128 ? hub75_panels : 2));
             for (int frame = 0; frame < 1500; frame++) {

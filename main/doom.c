@@ -2,7 +2,6 @@
 #include "doom.h"
 
 #include "doom_port.h"
-#include "esp_psram.h"
 #include "gfx.h"
 #include "hub75.h"
 #include "input.h"
@@ -100,7 +99,7 @@ static int get_key(int *pressed, unsigned char *key)
 
 bool doom_available(void)
 {
-    return esp_psram_is_initialized() && doom_wad_ok();
+    return doom_wad_ok();
 }
 
 bool doom_run(void)

@@ -17,7 +17,8 @@ int main(void)
         init(&s, (view_t){0,0,128,height}, ALL_PLAYERS, true);
         check_occupancy(&s);
         for (int i = 0; i < 200 && !s.over; i++) {
-            update(&s, input); check_occupancy(&s);
+            update(&s, input);
+            if (!s.over) check_occupancy(&s); // the final bodies stay to blink
         }
         // A wall death with two other survivors must free head, body and tail.
         init(&s, (view_t){0,0,128,height}, 7, true);
@@ -40,15 +41,14 @@ int main(void)
         s.tick = s.interval - 1; update(&s, input);
         assert(!f->dead && cell_at(f, 0) == old_head);
         check_occupancy(&s);
-        // Cleanup must also run on the final death before entering the result delay.
+        // The final death keeps the bodies on screen, they blink during the result delay.
         init(&s, (view_t){0,0,128,height}, 3, true);
         w = &s.w[0]; memset(s.occ, 0, sizeof(s.occ));
         for (int i = 0; i < s.w[1].len; i++) s.occ[cell_at(&s.w[1],i)] = 1;
         w->head = 3; w->dx = -1;
         for (int i = 0; i < 4; i++) { w->body[i] = 4 * COLS + 3 - i; s.occ[w->body[i]] = 1; }
         s.tick = s.interval - 1; update(&s, input);
-        assert(s.over && w->dead);
-        for (int i = 0; i < 4; i++) assert(!s.occ[w->body[i]]);
+        assert(s.over && w->dead && w->len == 4);
     }
     puts("Snake corpse regressions passed");
 }

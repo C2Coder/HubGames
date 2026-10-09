@@ -184,19 +184,19 @@ static game_status_t update(void *p, const input_t *in)
             s->w[pl].dead = true;
         }
 
-    // Clear every old body cell, including the head, before survivors move.
-    // The tail may already be free; clearing it again is harmless at this point.
+    if (alive_count(s) <= 1) {
+        s->over = true; // keep the last dead bodies on screen, they blink
+        return GAME_RUNNING;
+    }
+
+    // dead snakes leave the board when the game goes on, head included
     for (int pl = 0; pl < MAX_PLAYERS; pl++) {
-        if (!died[pl]) continue;
+        if (!died[pl])
+            continue;
         worm_t *w = &s->w[pl];
         for (int i = 0; i < w->len; i++)
             s->occ[cell_at(w, i)] = 0;
         w->len = 0;
-    }
-
-    if (alive_count(s) <= 1) {
-        s->over = true;
-        return GAME_RUNNING;
     }
 
     int total = 0;

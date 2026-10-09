@@ -1,24 +1,19 @@
-# Micro FPS / ESP DOOM research
+# Micro FPS
 
-Investigated existing ESP32 options:
-
-- https://github.com/w1ne/doomgeneric-esp32 — full GPLv2 Doom engine for an ESP32-S3 N16R8 (16 MB flash / 8 MB PSRAM), with a WAD in flash and a dedicated LCD backend.
-- https://github.com/chayantank/esp32-doom — a small Arduino/OLED raycaster targeting 128×64. Its repository did not provide an explicit license when inspected, so its code/assets were not copied.
-
-This project currently configures ESP-IDF 5.5.1 and 16 MB flash, with no PSRAM setup
-or WAD partition. Micro FPS is an independently written lightweight raycaster
-within the existing game interface and HUB75 renderer. No upstream engine or
-Doom/Wolfenstein assets are included. A future full-Doom integration would need
-the board's PSRAM wiring/capacity confirmed, a HUB75 backend, a WAD storage plan,
-and an appropriate engine/data license.
+A small original raycaster (no engine code or WAD data), so a first person
+shooter also runs per panel in VERSUS, next to the full DOOM in 1 PLAYER.
 
 Movement and rays use fixed point and a sine table; walls use bounded DDA.
-Billboards are sorted and depth-tested against wall columns. Joystick Y moves
-forward/back; X turns. Holding B changes X to strafing; A autofires with cooldown
-and mild aim assistance. Arrows are an alternative. Kill six enemies, then reach
-the southeast open area to win. Health is restored slightly by a kill.
+Enemy billboards are sorted and depth-tested against the wall columns.
+Joystick Y moves forward/back, X turns; holding B turns X into strafing; A
+autofires with a cooldown and mild aim assist. Arrows work too. Kill six
+enemies, then reach the open area in the south-east corner to win. A kill
+restores a little health.
 
-1 PLAYER uses the full 128×64 screen. VERSUS runs independent 64×64 runs on the two
-panels, comparing kills and remaining health, or finishing instantly on a win.
+1 PLAYER uses the whole screen. VERSUS runs an independent 64x64 game per
+panel: the first to escape wins, otherwise kills and remaining health decide.
 
-Po přepnutí upstreamu na `C2Coder/HubGames` je zachován také jeho plný doomgeneric port jako volitelné sestavení s PSRAM/WAD. MICRO FPS zůstává výchozí nezávislá varianta.
+Existing ESP32 options looked at first:
+
+- https://github.com/w1ne/doomgeneric-esp32 - full GPLv2 Doom engine for an ESP32-S3 N16R8 with the WAD in flash (the same approach as `components/doomgeneric`).
+- https://github.com/chayantank/esp32-doom - a small Arduino/OLED raycaster for 128x64. No license, so nothing was copied.
