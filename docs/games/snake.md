@@ -27,3 +27,13 @@ Arrows or joystick turn. Up to 2 turns are queued so quick double turns work, re
 ## State
 
 About 6 KB (occupancy grid + body ring buffer for the 64x29 single board), under `GAME_STATE_MAX`.
+
+## Snake Arena (1v1 only)
+
+Implemented in `main/games/arena.c`, a shared game (`game_t.shared`).
+
+- Both snakes on one 64x29 board across both panels, P1 starts top-left moving right, P2 bottom-right moving left.
+- 2 food items at once, scores shown in the player colors left and right on the HUD.
+- Wall, own body or the other snake = death. Head-on into the same cell kills both.
+- Speed goes up every 6 food eaten in total.
+- Survivor wins, both dying on the same step is a draw.

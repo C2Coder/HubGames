@@ -14,16 +14,20 @@
 
 const uint16_t player_color[2] = {C_GREEN, C_BLUE};
 
-// NULL = not implemented yet, shown dimmed
+enum { M_SINGLE = 1, M_VS = 2, M_ALL = 3 };
+
+// game NULL = not implemented yet, shown dimmed
 static const struct {
     const char *name;
     const game_t *game;
+    uint8_t modes;
 } menu[] = {
-    {"TETRIS", NULL},
-    {"SNAKE", &game_snake},
-    {"PONG", NULL},
-    {"DONKEY KONG", NULL},
-    {"MARIO", NULL},
+    {"TETRIS", NULL, M_ALL},
+    {"SNAKE", &game_snake, M_ALL},
+    {"SNAKE ARENA", &game_snake_arena, M_VS},
+    {"PONG", NULL, M_ALL},
+    {"DONKEY KONG", NULL, M_ALL},
+    {"MARIO", NULL, M_ALL},
 };
 #define MENU_N (int)(sizeof(menu) / sizeof(menu[0]))
 
@@ -46,6 +50,11 @@ static void center_text(int y, int scale, uint16_t c, const char *s)
     }
 }
 
+static bool in_mode(int i)
+{
+    return menu[i].modes & (versus ? M_VS : M_SINGLE);
+}
+
 static bool players_ok(void)
 {
     return in[0].connected && (!versus || in[1].connected);
@@ -54,7 +63,9 @@ static bool players_ok(void)
 static void start_game(void)
 {
     game = menu[game_sel].game;
-    if (versus) {
+    if (versus && game->shared) {
+        game->init(gs[0], (view_t){0, 0, 128, 64}, 0, true);
+    } else if (versus) {
         game->init(gs[0], (view_t){0, 0, 64, 64}, 0, true);
         game->init(gs[1], (view_t){64, 0, 64, 64}, 1, true);
     } else {
@@ -68,7 +79,7 @@ static void start_game(void)
 static void draw_game(void)
 {
     game->draw(gs[0]);
-    if (versus)
+    if (versus && !game->shared)
         game->draw(gs[1]);
 }
 
@@ -86,6 +97,8 @@ static void mode_menu(void)
         mode_sel ^= 1;
     if (in[0].pressed & BTN_A) {
         versus = mode_sel;
+        if (!in_mode(game_sel))
+            game_sel = 1;
         state = S_GAMES;
         return;
     }
@@ -99,9 +112,9 @@ static void mode_menu(void)
 static void games_menu(void)
 {
     if (in[0].pressed & BTN_UP)
-        game_sel = (game_sel + MENU_N - 1) % MENU_N;
+        do game_sel = (game_sel + MENU_N - 1) % MENU_N; while (!in_mode(game_sel));
     if (in[0].pressed & BTN_DOWN)
-        game_sel = (game_sel + 1) % MENU_N;
+        do game_sel = (game_sel + 1) % MENU_N; while (!in_mode(game_sel));
     if (in[0].pressed & BTN_B) {
         state = S_MODE;
         return;
@@ -114,9 +127,11 @@ static void games_menu(void)
     }
 
     gfx_text_center(64, 1, 1, C_GRAY, versus ? "1V1" : "1 PLAYER");
-    for (int i = 0; i < MENU_N; i++) {
+    for (int i = 0, row = 0; i < MENU_N; i++) {
+        if (!in_mode(i))
+            continue;
         uint16_t c = menu[i].game ? (i == game_sel ? C_WHITE : C_GRAY) : (i == game_sel ? C_GRAY : C_DARK);
-        int y = 11 + i * 8;
+        int y = 10 + row++ * 7;
         gfx_text_center(64, y, 1, c, menu[i].name);
         if (i == game_sel) {
             int w = gfx_text_width(1, menu[i].name);
@@ -151,7 +166,12 @@ static void play(void)
         return;
     }
 
-    if (!versus) {
+    if (versus && game->shared) {
+        if (game->update(gs[0], in) == GAME_OVER) {
+            winner = game->winner(gs[0]);
+            state = S_RESULT;
+        }
+    } else if (!versus) {
         if (game->update(gs[0], &in[0]) == GAME_OVER)
             state = S_RESULT;
     } else {
@@ -219,7 +239,8 @@ static void result_screen(void)
                 gfx_text_center(cx, 12, 2, C_GREEN, "WIN");
             else
                 gfx_text_center(cx, 12, 2, C_RED, "LOSE");
-            snprintf(buf, sizeof(buf), "SCORE %d", game->score(gs[p]));
+            int sc = game->shared ? game->score_of(gs[0], p) : game->score(gs[p]);
+            snprintf(buf, sizeof(buf), "SCORE %d", sc);
             gfx_text_center(cx, 32, 1, player_color[p], buf);
         }
     }

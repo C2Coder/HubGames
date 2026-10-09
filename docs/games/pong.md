@@ -47,7 +47,7 @@ Interface change in `game.h`:
 Changes in `main.c`:
 - `start_game`: `if (versus && game->shared)` call init once (full view), else the current per-panel path.
 - `draw_game`: draw `gs[1]` only if `versus && !game->shared`.
-- `play` (versus branch): if shared, call `update(gs[0], in)` once; `GAME_OVER` goes to `S_RESULT`; winner = higher `score_of(gs[0], p)` (never a draw in first-to-5). The `over[]` / `vs_rule` logic is skipped.
+- `play` (versus branch): if shared, call `update(gs[0], in)` once; `GAME_OVER` goes to `S_RESULT`; winner comes from the game's `winner()` (already in `game_t`, used by Snake Arena). The `over[]` / `vs_rule` logic is skipped.
 - `result_screen`: for shared games use `score_of(gs[0], p)` per panel instead of `score(gs[p])`; the WIN / LOSE text per panel is unchanged.
 - Menu entry: `{"PONG", &game_pong}`.
 - Pause and countdown already work, they only call `draw_game`.
