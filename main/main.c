@@ -12,37 +12,46 @@
 #define FRAME_MS        20
 #define COUNTDOWN_TICKS (3000 / FRAME_MS)
 
-const uint16_t player_color[2] = {C_GREEN, C_BLUE};
+const uint16_t player_color[MAX_PLAYERS] = {C_GREEN, C_BLUE, C_YELLOW, C_PINK};
 
-enum { M_SINGLE = 1, M_VS = 2, M_ALL = 3 };
+enum { MODE_SINGLE, MODE_VS, MODE_PARTY, MODE_N };
+enum { M_SINGLE = 1 << MODE_SINGLE, M_VS = 1 << MODE_VS, M_PARTY = 1 << MODE_PARTY };
 
-// game NULL = not implemented yet, shown dimmed
+static const char *const mode_names[MODE_N] = {"1 PLAYER", "1V1", "PARTY"};
+
 static const struct {
     const char *name;
     const game_t *game;
     uint8_t modes;
 } menu[] = {
-    {"TETRIS", NULL, M_ALL},
-    {"SNAKE", &game_snake, M_ALL},
-    {"SNAKE ARENA", &game_snake_arena, M_VS},
-    {"PONG", NULL, M_ALL},
-    {"DONKEY KONG", NULL, M_ALL},
-    {"MARIO", NULL, M_ALL},
+    {"TETRIS", &game_tetris, M_SINGLE | M_VS},
+    {"SNAKE", &game_snake, M_SINGLE | M_VS},
+    {"SNAKE ARENA", &game_snake_arena, M_VS | M_PARTY},
+    {"PONG", &game_pong, M_SINGLE | M_VS | M_PARTY},
+    {"DONKEY KONG", &game_dk, M_SINGLE | M_VS},
+    {"MARIO", &game_mario, M_SINGLE | M_VS},
 };
 #define MENU_N (int)(sizeof(menu) / sizeof(menu[0]))
 
 enum { S_MODE, S_GAMES, S_COUNTDOWN, S_PLAY, S_PAUSE, S_RESULT };
 
-static int state = S_MODE, mode_sel, game_sel = 1, timer, winner;
-static bool versus, over[2];
+static int state = S_MODE, mode, game_sel = 1, timer;
+static uint8_t players; // mask of players in the running game
+static uint8_t winners; // mask, 0 = draw
+static bool won, over[2];
 static const game_t *game;
 static uint8_t gs[2][GAME_STATE_MAX] __attribute__((aligned(4)));
-static input_t in[2];
+static input_t in[MAX_PLAYERS];
 
-// text centered on the whole screen, or on each panel in 1v1
+static bool per_panel(void)
+{
+    return mode != MODE_SINGLE && !game->shared;
+}
+
+// text centered on the whole screen, or on each panel for per-panel games
 static void center_text(int y, int scale, uint16_t c, const char *s)
 {
-    if (versus) {
+    if (per_panel()) {
         gfx_text_center(32, y, scale, c, s);
         gfx_text_center(96, y, scale, c, s);
     } else {
@@ -52,26 +61,46 @@ static void center_text(int y, int scale, uint16_t c, const char *s)
 
 static bool in_mode(int i)
 {
-    return menu[i].modes & (versus ? M_VS : M_SINGLE);
+    return menu[i].modes & (1 << mode);
+}
+
+static uint8_t connected_mask(void)
+{
+    uint8_t m = 0;
+    for (int p = 0; p < MAX_PLAYERS; p++)
+        if (in[p].connected)
+            m |= 1 << p;
+    return m;
 }
 
 static bool players_ok(void)
 {
-    return in[0].connected && (!versus || in[1].connected);
+    return (connected_mask() & players) == players;
+}
+
+static uint8_t pressed_any(void)
+{
+    uint8_t b = 0;
+    for (int p = 0; p < MAX_PLAYERS; p++)
+        if ((players >> p) & 1)
+            b |= in[p].pressed;
+    return b;
 }
 
 static void start_game(void)
 {
     game = menu[game_sel].game;
-    if (versus && game->shared) {
-        game->init(gs[0], (view_t){0, 0, 128, 64}, 0, true);
-    } else if (versus) {
-        game->init(gs[0], (view_t){0, 0, 64, 64}, 0, true);
-        game->init(gs[1], (view_t){64, 0, 64, 64}, 1, true);
+    players = mode == MODE_SINGLE ? 0x1 : mode == MODE_VS ? 0x3 : connected_mask();
+    if (mode == MODE_SINGLE) {
+        game->init(gs[0], (view_t){0, 0, 128, 64}, players, false);
+    } else if (game->shared) {
+        game->init(gs[0], (view_t){0, 0, 128, 64}, players, true);
     } else {
-        game->init(gs[0], (view_t){0, 0, 128, 64}, 0, false);
+        game->init(gs[0], (view_t){0, 0, 64, 64}, 0x1, true);
+        game->init(gs[1], (view_t){64, 0, 64, 64}, 0x2, true);
     }
     over[0] = over[1] = false;
+    won = false;
     timer = 0;
     state = S_COUNTDOWN;
 }
@@ -79,7 +108,7 @@ static void start_game(void)
 static void draw_game(void)
 {
     game->draw(gs[0]);
-    if (versus && !game->shared)
+    if (per_panel())
         game->draw(gs[1]);
 }
 
@@ -93,20 +122,26 @@ static void mode_menu(void)
         return;
     }
 
-    if (in[0].pressed & (BTN_UP | BTN_DOWN))
-        mode_sel ^= 1;
+    if (in[0].pressed & BTN_UP)
+        mode = (mode + MODE_N - 1) % MODE_N;
+    if (in[0].pressed & BTN_DOWN)
+        mode = (mode + 1) % MODE_N;
     if (in[0].pressed & BTN_A) {
-        versus = mode_sel;
+        if (!in_mode(game_sel))
+            game_sel = 2; // snake arena is in every multiplayer mode
         if (!in_mode(game_sel))
             game_sel = 1;
         state = S_GAMES;
         return;
     }
 
-    gfx_text_center(64, 12, 2, mode_sel == 0 ? C_WHITE : C_DARK, "1 PLAYER");
-    gfx_text_center(64, 32, 2, mode_sel == 1 ? C_WHITE : C_DARK, "1V1");
-    gfx_text(52, 57, 1, in[0].connected ? player_color[0] : C_DARK, "P1");
-    gfx_text(68, 57, 1, in[1].connected ? player_color[1] : C_DARK, "P2");
+    for (int m = 0; m < MODE_N; m++)
+        gfx_text_center(64, 4 + m * 17, 2, m == mode ? C_WHITE : C_DARK, mode_names[m]);
+    char name[3] = {'P', 0, 0};
+    for (int p = 0; p < MAX_PLAYERS; p++) {
+        name[1] = '1' + p;
+        gfx_text(37 + p * 15, 58, 1, in[p].connected ? player_color[p] : C_DARK, name);
+    }
 }
 
 static void games_menu(void)
@@ -120,19 +155,19 @@ static void games_menu(void)
         return;
     }
 
-    bool ready = !versus || in[1].connected;
-    if ((in[0].pressed & BTN_A) && menu[game_sel].game && ready) {
+    int n = __builtin_popcount(connected_mask());
+    bool ready = mode == MODE_SINGLE || (mode == MODE_VS ? in[1].connected : n >= 2);
+    if ((in[0].pressed & BTN_A) && ready) {
         start_game();
         return;
     }
 
-    gfx_text_center(64, 1, 1, C_GRAY, versus ? "1V1" : "1 PLAYER");
+    gfx_text_center(64, 1, 1, C_GRAY, mode_names[mode]);
     for (int i = 0, row = 0; i < MENU_N; i++) {
         if (!in_mode(i))
             continue;
-        uint16_t c = menu[i].game ? (i == game_sel ? C_WHITE : C_GRAY) : (i == game_sel ? C_GRAY : C_DARK);
         int y = 10 + row++ * 7;
-        gfx_text_center(64, y, 1, c, menu[i].name);
+        gfx_text_center(64, y, 1, i == game_sel ? C_WHITE : C_GRAY, menu[i].name);
         if (i == game_sel) {
             int w = gfx_text_width(1, menu[i].name);
             gfx_text(64 - w / 2 - 7, y, 1, C_YELLOW, ">");
@@ -140,14 +175,19 @@ static void games_menu(void)
         }
     }
     if (!ready)
-        gfx_text_center(64, 57, 1, C_YELLOW, "WAITING FOR P2");
+        gfx_text_center(64, 57, 1, C_YELLOW, mode == MODE_VS ? "WAITING FOR P2" : "NEED 2+ PLAYERS");
+    else if (mode == MODE_PARTY) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%d PLAYERS", n);
+        gfx_text_center(64, 57, 1, C_GRAY, buf);
+    }
 }
 
 static void countdown(void)
 {
     draw_game();
     char buf[2] = {'3' - timer * 3 / COUNTDOWN_TICKS, 0};
-    if (versus) {
+    if (per_panel()) {
         gfx_rect(26, 22, 13, 22, C_BLACK);
         gfx_rect(90, 22, 13, 22, C_BLACK);
     } else {
@@ -158,35 +198,49 @@ static void countdown(void)
         state = S_PLAY;
 }
 
+// higher score wins, equal = draw
+static uint8_t by_score(int s0, int s1)
+{
+    return s0 > s1 ? 0x1 : s1 > s0 ? 0x2 : 0;
+}
+
 static void play(void)
 {
-    if (!players_ok() || ((in[0].pressed | in[1].pressed) & BTN_START)) {
+    if (!players_ok() || (pressed_any() & BTN_START)) {
         state = S_PAUSE;
         draw_game();
         return;
     }
 
-    if (versus && game->shared) {
-        if (game->update(gs[0], in) == GAME_OVER) {
-            winner = game->winner(gs[0]);
+    if (mode == MODE_SINGLE) {
+        game_status_t st = game->update(gs[0], &in[0]);
+        if (st != GAME_RUNNING) {
+            won = st == GAME_WON;
             state = S_RESULT;
         }
-    } else if (!versus) {
-        if (game->update(gs[0], &in[0]) == GAME_OVER)
+    } else if (game->shared) {
+        if (game->update(gs[0], in) != GAME_RUNNING) {
+            winners = game->winners(gs[0]);
             state = S_RESULT;
+        }
     } else {
+        game_status_t st[2] = {GAME_RUNNING, GAME_RUNNING};
         for (int p = 0; p < 2; p++)
-            if (!over[p])
-                over[p] = game->update(gs[p], &in[p]) == GAME_OVER;
-
-        bool done = game->vs_rule == VS_FIRST_DEATH ? (over[0] || over[1]) : (over[0] && over[1]);
-        if (done) {
-            if (game->vs_rule == VS_FIRST_DEATH && over[0] != over[1]) {
-                winner = over[0] ? 2 : 1;
-            } else {
-                int s0 = game->score(gs[0]), s1 = game->score(gs[1]);
-                winner = s0 > s1 ? 1 : s1 > s0 ? 2 : 0;
+            if (!over[p]) {
+                st[p] = game->update(gs[p], &in[p]);
+                over[p] = st[p] != GAME_RUNNING;
             }
+
+        bool w0 = st[0] == GAME_WON, w1 = st[1] == GAME_WON;
+        bool done = game->vs_rule == VS_FIRST_DEATH ? (over[0] || over[1]) : (over[0] && over[1]);
+        if (w0 || w1) {
+            winners = w0 && w1 ? by_score(game->score(gs[0]), game->score(gs[1])) : w0 ? 0x1 : 0x2;
+            state = S_RESULT;
+        } else if (done) {
+            if (game->vs_rule == VS_FIRST_DEATH && over[0] != over[1])
+                winners = over[0] ? 0x2 : 0x1;
+            else
+                winners = by_score(game->score(gs[0]), game->score(gs[1]));
             state = S_RESULT;
         }
     }
@@ -195,7 +249,7 @@ static void play(void)
 
 static void pause_screen(void)
 {
-    uint8_t pressed = in[0].pressed | in[1].pressed;
+    uint8_t pressed = pressed_any();
     if ((pressed & (BTN_A | BTN_START)) && players_ok()) {
         state = S_PLAY;
         return;
@@ -207,15 +261,23 @@ static void pause_screen(void)
 
     draw_game();
     gfx_rect(0, 18, HUB75_W, 30, C_BLACK);
-    const char *title = players_ok() ? "PAUSED" : !in[0].connected ? "P1 LOST" : "P2 LOST";
-    center_text(20, 1, players_ok() ? C_WHITE : C_RED, title);
+    char title[10] = "PAUSED";
+    uint8_t lost = players & ~connected_mask();
+    if (lost)
+        snprintf(title, sizeof(title), "P%d LOST", __builtin_ctz(lost) + 1);
+    center_text(20, 1, lost ? C_RED : C_WHITE, title);
     center_text(32, 1, C_GRAY, "A RESUME");
     center_text(40, 1, C_GRAY, "B QUIT");
 }
 
+static int player_score(int p)
+{
+    return game->shared ? game->score_of(gs[0], p) : game->score(gs[p]);
+}
+
 static void result_screen(void)
 {
-    uint8_t pressed = in[0].pressed | in[1].pressed;
+    uint8_t pressed = pressed_any();
     if (pressed & BTN_A) {
         start_game();
         return;
@@ -226,33 +288,60 @@ static void result_screen(void)
     }
 
     char buf[16];
-    if (!versus) {
-        gfx_text_center(64, 12, 2, C_RED, "GAME OVER");
+    if (mode == MODE_SINGLE) {
+        if (won)
+            gfx_text_center(64, 12, 2, C_GREEN, "YOU WIN");
+        else
+            gfx_text_center(64, 12, 2, C_RED, "GAME OVER");
         snprintf(buf, sizeof(buf), "SCORE %d", game->score(gs[0]));
         gfx_text_center(64, 32, 1, C_WHITE, buf);
-    } else {
+        gfx_text_center(64, 52, 1, C_GRAY, "A AGAIN B MENU");
+    } else if (mode == MODE_VS) {
         for (int p = 0; p < 2; p++) {
             int cx = 32 + p * 64;
-            if (winner == 0)
+            if (winners == 0)
                 gfx_text_center(cx, 12, 2, C_YELLOW, "DRAW");
-            else if (winner == p + 1)
+            else if ((winners >> p) & 1)
                 gfx_text_center(cx, 12, 2, C_GREEN, "WIN");
             else
                 gfx_text_center(cx, 12, 2, C_RED, "LOSE");
-            int sc = game->shared ? game->score_of(gs[0], p) : game->score(gs[p]);
-            snprintf(buf, sizeof(buf), "SCORE %d", sc);
+            snprintf(buf, sizeof(buf), "SCORE %d", player_score(p));
             gfx_text_center(cx, 32, 1, player_color[p], buf);
+            gfx_text_center(cx, 52, 1, C_GRAY, "A AGAIN B MENU");
         }
+    } else {
+        if (winners == 0) {
+            gfx_text_center(64, 8, 2, C_YELLOW, "DRAW");
+        } else {
+            // "P1 P3 WIN", each name in its color
+            int n = __builtin_popcount(winners);
+            int w = n * 12 + gfx_text_width(2, "WIN");
+            int x = 64 - w / 2;
+            for (int p = 0; p < MAX_PLAYERS; p++) {
+                if (!((winners >> p) & 1))
+                    continue;
+                snprintf(buf, sizeof(buf), "P%d", p + 1);
+                gfx_text(x, 11, 1, player_color[p], buf);
+                x += 12;
+            }
+            gfx_text(x, 8, 2, C_GREEN, "WIN");
+        }
+        for (int p = 0; p < MAX_PLAYERS; p++) {
+            if (!((players >> p) & 1))
+                continue;
+            snprintf(buf, sizeof(buf), "P%d %d", p + 1, player_score(p));
+            gfx_text_center(16 + p * 32, 32, 1, player_color[p], buf);
+        }
+        gfx_text_center(64, 52, 1, C_GRAY, "A AGAIN B MENU");
     }
-    center_text(52, 1, C_GRAY, "A AGAIN B MENU");
 }
 
 static void game_task(void *arg)
 {
     TickType_t last = xTaskGetTickCount();
     while (1) {
-        input_get(0, &in[0]);
-        input_get(1, &in[1]);
+        for (int p = 0; p < MAX_PLAYERS; p++)
+            input_get(p, &in[p]);
         gfx_clear();
 
         switch (state) {

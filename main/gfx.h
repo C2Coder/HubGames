@@ -14,6 +14,7 @@
 #define C_GREEN  RGB(0, 255, 0)
 #define C_BLUE   RGB(0, 128, 255)
 #define C_YELLOW RGB(255, 200, 0)
+#define C_PINK   RGB(255, 0, 255)
 
 typedef struct {
     int x, y, w, h;

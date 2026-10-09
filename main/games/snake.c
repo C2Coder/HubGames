@@ -40,12 +40,12 @@ static bool place_food(snake_t *s)
     return true;
 }
 
-static void init(void *p, view_t v, int player, bool versus)
+static void init(void *p, view_t v, uint8_t players, bool versus)
 {
     snake_t *s = p;
     memset(s, 0, sizeof(*s));
     s->v = v;
-    s->player = player;
+    s->player = __builtin_ctz(players);
     s->versus = versus;
     s->cols = v.w / CELL;
     s->rows = (v.h - HUD) / CELL;

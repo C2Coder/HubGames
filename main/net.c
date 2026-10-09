@@ -28,12 +28,12 @@ typedef struct {
     TickType_t seen;
 } slot_t;
 
-static slot_t slots[2] = {{.fd = -1}, {.fd = -1}};
+static slot_t slots[MAX_PLAYERS] = {{.fd = -1}, {.fd = -1}, {.fd = -1}, {.fd = -1}};
 static portMUX_TYPE lock = portMUX_INITIALIZER_UNLOCKED;
 
 void input_get(int p, input_t *in)
 {
-    static uint8_t prev[2];
+    static uint8_t prev[MAX_PLAYERS];
 
     portENTER_CRITICAL(&lock);
     slot_t *s = &slots[p];
@@ -78,10 +78,10 @@ static esp_err_t ws_handler(httpd_req_t *req)
     int fd = httpd_req_to_sockfd(req);
     int p = -1;
     portENTER_CRITICAL(&lock);
-    for (int i = 0; i < 2 && p < 0; i++)
+    for (int i = 0; i < MAX_PLAYERS && p < 0; i++)
         if (slots[i].fd == fd)
             p = i;
-    for (int i = 0; i < 2 && p < 0; i++)
+    for (int i = 0; i < MAX_PLAYERS && p < 0; i++)
         if (slots[i].fd < 0)
             p = i;
     if (p >= 0) {
@@ -109,7 +109,7 @@ static esp_err_t page_handler(httpd_req_t *req)
 static void on_close(httpd_handle_t hd, int fd)
 {
     portENTER_CRITICAL(&lock);
-    for (int i = 0; i < 2; i++)
+    for (int i = 0; i < MAX_PLAYERS; i++)
         if (slots[i].fd == fd)
             slots[i].fd = -1;
     portEXIT_CRITICAL(&lock);
@@ -136,7 +136,7 @@ void net_init(void)
             .ssid = SSID,
             .ssid_len = strlen(SSID),
             .channel = 6,
-            .max_connection = 4,
+            .max_connection = 8,
             .authmode = WIFI_AUTH_OPEN,
         },
     };

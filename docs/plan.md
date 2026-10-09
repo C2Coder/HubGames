@@ -6,15 +6,15 @@
 - The page is plain HTML/CSS/JS embedded in the firmware (no CDN, phones on the hotspot have no internet).
 - Layout (landscape phone): joystick, D-pad, A and B; top bar with the player label and a pause (START) button.
 - Input goes over a WebSocket: buttons bitmask + joystick x/y, sent on every change and every 100 ms as keepalive.
-- First connected phone is P1, second is P2. A slot frees on disconnect or 2 s without data.
+- Phones get P1-P4 in connect order (green, blue, yellow, pink). A slot frees on disconnect or 2 s without data.
 - Firmware sees one input struct per player: `up/down/left/right` (arrows OR joystick past a deadzone), `a`, `b`, analog `jx/jy`, plus "just pressed" edges.
 
 ## Menus (on the panels, 128x64)
 
-1. **Mode** - Single / 1v1 (1v1 waits until two phones are connected).
+1. **Mode** - Single / 1v1 (needs P1 + P2) / Party (2-4 players, shared-screen games only: Snake Arena, Pong teams).
 2. **Game** - Tetris, Snake, Pong, Donkey Kong, Mario as a list, games not implemented yet are dimmed.
 3. **Game** - 3 s countdown, the pause button pauses (also automatic when a needed phone disconnects), in pause A resumes, B goes back to the game menu.
-4. **Result** - score / winner, A plays again, B back to the game menu.
+4. **Result** - GAME OVER or YOU WIN (single), WIN/LOSE per panel (1v1), winners + scores (party). A plays again, B back to the game menu.
 
 Menus are controlled by P1. Tiny 3x5 pixel font for text.
 

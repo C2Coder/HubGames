@@ -12,6 +12,7 @@ html, body { height: 100%; background: #111; color: #eee; font-family: sans-seri
 .t { height: 9vh; padding: 0 3vh; border-radius: 5vh; background: #333; display: flex; align-items: center; justify-content: center; font-size: 4.5vh; color: #aaa; }
 #pad { height: 100vh; display: flex; }
 #left, #right { flex: 1; display: flex; align-items: center; justify-content: center; padding-top: 10vh; }
+#left { justify-content: flex-start; padding-left: 5vh; }
 #joy { width: 52vh; height: 52vh; border-radius: 50%; background: #222; border: 0.5vh solid #444; position: relative; }
 #knob { width: 22vh; height: 22vh; border-radius: 50%; background: #666; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
 #dpad { display: grid; grid-template-columns: repeat(3, 19vh); grid-template-rows: repeat(3, 19vh); gap: 1.5vh; }
@@ -51,7 +52,7 @@ function send() {
 
 function show(p) {
   who.textContent = p < 0 ? 'connecting...' : p === 0 ? 'full' : 'P' + p;
-  who.style.color = p === 1 ? '#0f0' : p === 2 ? '#08f' : '#888';
+  who.style.color = ['#888', '#0f0', '#08f', '#fc0', '#f0f'][p < 0 ? 0 : p];
 }
 
 function connect() {

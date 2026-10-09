@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define MAX_PLAYERS 4
+
 enum {
     BTN_UP = 1,
     BTN_DOWN = 2,
@@ -21,5 +23,5 @@ typedef struct {
     bool connected;
 } input_t;
 
-// Call once per frame for each player (0 = P1, 1 = P2).
+// Call once per frame for each player (0 = P1 .. 3 = P4).
 void input_get(int player, input_t *in);
