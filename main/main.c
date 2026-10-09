@@ -1,9 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_system.h"
 
 #include "ambient.h"
 #include "fx.h"
@@ -13,6 +16,7 @@
 #include "input.h"
 #include "net.h"
 #include "settings.h"
+#include "school.h"
 
 #define FRAME_MS        20
 #define COUNTDOWN_TICKS (3000 / FRAME_MS)
@@ -20,14 +24,16 @@
 #define MENU_BG         70 // ambient level behind menus
 #define GAME_BG         25 // ambient level behind games
 
-const uint16_t player_color[MAX_PLAYERS] = {C_GREEN, C_BLUE, C_YELLOW, C_PINK};
+const uint16_t player_color[MAX_PLAYERS] = {C_GREEN, C_BLUE, C_YELLOW, C_PINK,
+    RGB(255, 96, 0), RGB(0, 255, 255), RGB(255, 255, 255), RGB(128, 64, 255),
+    RGB(176, 255, 0), RGB(255, 48, 48), RGB(0, 176, 128), RGB(255, 144, 192)};
 
 enum { MODE_SINGLE, MODE_VS, MODE_PARTY };
 enum { M_SINGLE = 1 << MODE_SINGLE, M_VS = 1 << MODE_VS, M_PARTY = 1 << MODE_PARTY };
 
 // main menu, the first three are game modes
-enum { MAIN_SINGLE, MAIN_VS, MAIN_PARTY, MAIN_AMBIENT, MAIN_SETTINGS, MAIN_N };
-static const char *const main_items[MAIN_N] = {"1 PLAYER", "VERSUS", "PARTY", "AMBIENT", "SETTINGS"};
+enum { MAIN_SINGLE, MAIN_VS, MAIN_PARTY, MAIN_AMBIENT, MAIN_SCHOOL, MAIN_SETTINGS, MAIN_N };
+static const char *const main_items[MAIN_N] = {"1 PLAYER", "VERSUS", "PARTY", "AMBIENT", "SPŠ TRUTNOV", "SETTINGS"};
 
 static const struct {
     const char *name;
@@ -40,34 +46,55 @@ static const struct {
     {"PONG", &game_pong, M_SINGLE | M_VS | M_PARTY},
     {"DONKEY KONG", &game_dk, M_SINGLE | M_VS},
     {"MARIO", &game_mario, M_SINGLE | M_VS},
+    {"BOMBER ARENA", &game_bomber, M_VS | M_PARTY},
+    {"TRON", &game_tron, M_VS | M_PARTY},
+    {"POCKET RACERS", &game_racers, M_VS | M_PARTY},
+    {"PIXEL FOOTBALL", &game_football, M_VS | M_PARTY},
+    {"TRICKY TOWERS", &game_towers, M_VS | M_PARTY},
+    {"MICRO FPS", &game_fps, M_SINGLE | M_VS},
+    {"PARTY CUP", NULL, M_PARTY},
 };
 #define MENU_N (int)(sizeof(menu) / sizeof(menu[0]))
 
 enum { SET_PANELS, SET_BRIGHT, SET_TEST, SET_N };
 
-enum { S_MAIN, S_GAMES, S_COUNTDOWN, S_PLAY, S_PAUSE, S_RESULT, S_AMBIENT, S_SETTINGS, S_PANELTEST };
+enum { S_MAIN, S_GAMES, S_COUNTDOWN, S_PLAY, S_PAUSE, S_RESULT, S_AMBIENT, S_SCHOOL, S_SETTINGS, S_PANELTEST };
 
 static uint32_t t; // frame counter
 static int state = S_MAIN, fade, timer;
 static int main_sel, mode, game_sel = 1, set_sel;
 static int bar_y = -1; // animated selection bar, 1/8 px
 static const game_t *game;
-static uint8_t players; // mask of players in the running game
-static uint8_t winners; // mask, 0 = draw
-static bool won, scaled;
+static player_mask_t players; // mask of players in the running game
+static player_mask_t winners; // mask, 0 = draw
+static bool won, scaled, cup_active;
+static int cup_round, cup_last = -1;
+static player_mask_t cup_players;
+static uint16_t cup_points[MAX_PLAYERS];
+#define CUP_ROUNDS 5
 
 // VERSUS per panel: instance k runs on panel k for player inst_player[k]
 static int n_inst;
-static int inst_player[MAX_PLAYERS];
-static bool over[MAX_PLAYERS];
-static uint8_t gs[MAX_PLAYERS][GAME_STATE_MAX] __attribute__((aligned(4)));
+static int inst_player[MAX_GAME_INSTANCES];
+static bool over[MAX_GAME_INSTANCES];
+static union {
+    uint8_t shared[GAME_STATE_MAX];
+    uint8_t panel[MAX_GAME_INSTANCES][PANEL_STATE_MAX];
+} gs_mem __attribute__((aligned(4)));
+static void *gs[MAX_GAME_INSTANCES];
 static input_t in[MAX_PLAYERS];
 
 static void start_game(void);
 
 static void set_state(int s)
 {
+    if (s == S_RESULT && cup_active) {
+        for (int p = 0; p < MAX_PLAYERS; p++)
+            if (players & (1u << p)) cup_points[p] += (winners & (1u << p)) ? 3 : 1;
+    }
     state = s;
+    if (s == S_MAIN || s == S_GAMES) cup_active = false;
+    if (s == S_MAIN || s == S_GAMES) net_set_controller(CONTROL_DEFAULT);
     fade = 0;
     timer = 0;
     bar_y = -1;
@@ -78,9 +105,9 @@ static int text_scale(void)
     return screen_h == 128 ? 2 : 1;
 }
 
-static uint8_t connected_mask(void)
+static player_mask_t connected_mask(void)
 {
-    uint8_t m = 0;
+    player_mask_t m = 0;
     for (int p = 0; p < MAX_PLAYERS; p++)
         if (in[p].connected)
             m |= 1 << p;
@@ -92,7 +119,7 @@ static bool players_ok(void)
     return (connected_mask() & players) == players;
 }
 
-static uint8_t pressed_any(uint8_t mask)
+static uint8_t pressed_any(player_mask_t mask)
 {
     uint8_t b = 0;
     for (int p = 0; p < MAX_PLAYERS; p++)
@@ -140,26 +167,31 @@ static void draw_list(const char *const *items, int n, int sel, int y0)
 {
     int scale = text_scale();
     int pitch = scale == 2 ? 16 : 8, bar_h = 5 * scale + 3;
-    int target = (y0 + sel * pitch - 2) * 8;
+    int visible = (screen_h - 14 - y0) / pitch;
+    if (visible < 1) visible = 1;
+    int first = sel >= visible ? sel - visible + 1 : 0;
+    int count = n - first < visible ? n - first : visible;
+    int target = (y0 + (sel - first) * pitch - 2) * 8;
     if (bar_y < 0)
         bar_y = target;
     bar_y += (target - bar_y) / 3;
     if (abs(target - bar_y) < 3)
         bar_y = target;
 
-    gfx_darken(0, y0 - 2, HUB75_W, n * pitch + 1);
+    gfx_darken(0, y0 - 2, HUB75_W, count * pitch + 1);
     gfx_rect(8, bar_y / 8, HUB75_W - 16, bar_h, gfx_hsv(t / 2, 200, 90));
-    for (int i = 0; i < n; i++)
-        gfx_text_center(64, y0 + i * pitch, scale, i == sel ? C_WHITE : C_GRAY, items[i]);
+    for (int i = 0; i < count; i++)
+        gfx_text_center(64, y0 + i * pitch, scale, first + i == sel ? C_WHITE : C_GRAY, items[first + i]);
 }
 
 static void draw_players_row(int y)
 {
-    int scale = text_scale();
-    char name[3] = {'P', 0, 0};
+    (void)y;
+    char name[8];
     for (int p = 0; p < MAX_PLAYERS; p++) {
-        name[1] = '1' + p;
-        gfx_text(64 - 29 * scale + p * 15 * scale, y, scale, in[p].connected ? player_color[p] : C_DARK, name);
+        snprintf(name, sizeof(name), "P%d", p + 1);
+        gfx_text_center(11 + (p % 6) * 21, screen_h - 12 + (p / 6) * 6,
+                        1, in[p].connected ? player_color[p] : C_DARK, name);
     }
 }
 
@@ -194,6 +226,9 @@ static void main_menu(void)
     if (in[0].pressed & BTN_A) {
         if (main_sel == MAIN_AMBIENT) {
             set_state(S_AMBIENT);
+        } else if (main_sel == MAIN_SCHOOL) {
+            fx_clear();
+            set_state(S_SCHOOL);
         } else if (main_sel == MAIN_SETTINGS) {
             set_state(S_SETTINGS);
         } else {
@@ -251,13 +286,14 @@ static void games_menu(void)
     gfx_text_center(64, scale, scale, C_GRAY, main_items[mode]);
     draw_list(items, cnt, sel, scale == 2 ? 20 : 9);
 
-    char buf[20];
+    char buf[32];
     int y = screen_h - 6 * scale;
     if (!ready) {
         gfx_text_center(64, y, scale, C_YELLOW, "NEED 2+ PLAYERS");
     } else if (mode != MODE_SINGLE) {
-        int max = menu[game_sel].game->shared ? MAX_PLAYERS : hub75_panels;
-        snprintf(buf, sizeof(buf), "%d PLAYERS", n < max ? n : max);
+        const game_t *g = menu[game_sel].game;
+        int max = !g || g->shared ? (g && g->max_players ? g->max_players : MAX_PLAYERS) : hub75_panels;
+        snprintf(buf, sizeof(buf), "%d/%d PLAYERS", n < max ? n : max, n);
         gfx_text_center(64, y, scale, C_GRAY, buf);
     }
 }
@@ -302,7 +338,7 @@ static void settings_menu(void)
 
 static void panel_test(void)
 {
-    if (pressed_any(0xf)) {
+    if (pressed_any(ALL_PLAYERS)) {
         set_state(S_SETTINGS);
         return;
     }
@@ -321,7 +357,7 @@ static void panel_test(void)
 
 static void ambient_mode(void)
 {
-    if (pressed_any(0xf)) {
+    if (pressed_any(ALL_PLAYERS)) {
         set_state(S_MAIN);
         return;
     }
@@ -335,7 +371,26 @@ static void ambient_mode(void)
 static void start_game(void)
 {
     game = menu[game_sel].game;
-    uint8_t conn = connected_mask();
+    player_mask_t conn = connected_mask();
+    if (!game) {
+        if (!cup_active) {
+            cup_active = true; cup_round = 1; cup_last = -1;
+            cup_players = conn;
+            memset(cup_points, 0, sizeof(cup_points));
+        }
+        conn = cup_players;
+        int eligible[MENU_N], count = 0;
+        for (int i = 0; i < MENU_N; i++) {
+            const game_t *g = menu[i].game;
+            if (!g || !g->shared || !(menu[i].modes & M_PARTY) || i == cup_last) continue;
+            if (g->max_players && g->max_players < __builtin_popcount(conn)) continue;
+            eligible[count++] = i;
+        }
+        cup_last = eligible[esp_random() % count];
+        game = menu[cup_last].game;
+    } else cup_active = false;
+    for (int k = 0; k < MAX_GAME_INSTANCES; k++)
+        gs[k] = mode != MODE_SINGLE && !game->shared ? gs_mem.panel[k] : gs_mem.shared;
     scaled = false;
     fx_scale = 1;
     fx_clear();
@@ -350,7 +405,10 @@ static void start_game(void)
         }
         game->init(gs[0], v, players, false);
     } else if (game->shared) {
-        players = conn; // everyone connected plays
+        players = 0;
+        int limit = game->max_players ? game->max_players : MAX_PLAYERS;
+        for (int p = 0, n = 0; p < MAX_PLAYERS && n < limit; p++)
+            if (conn & (1u << p)) { players |= 1u << p; n++; }
         game->init(gs[0], (view_t){0, 0, HUB75_W, screen_h}, players, true);
     } else {
         // one panel per player, as many as there are panels
@@ -366,6 +424,9 @@ static void start_game(void)
             n_inst++;
         }
     }
+    net_set_controller(game == &game_bomber ? CONTROL_BOMBER : game == &game_tron ? CONTROL_TRON :
+        game == &game_racers ? CONTROL_RACERS : game == &game_football ? CONTROL_FOOTBALL :
+        game == &game_towers ? CONTROL_TOWERS : game == &game_fps ? CONTROL_FPS : CONTROL_DEFAULT);
     won = false;
     winners = 0;
     set_state(S_COUNTDOWN);
@@ -373,7 +434,7 @@ static void start_game(void)
 
 static void draw_game(void)
 {
-    ambient_plasma(t, GAME_BG);
+    if (!game->opaque) ambient_plasma(t, GAME_BG);
     if (per_panel()) {
         for (int k = 0; k < n_inst; k++)
             game->draw(gs[k]);
@@ -397,10 +458,10 @@ static int player_score(int p)
 }
 
 // players with the best score, 0 if everyone ties
-static uint8_t best_score(void)
+static player_mask_t best_score(void)
 {
     int best = 0;
-    uint8_t m = 0;
+    player_mask_t m = 0;
     for (int k = 0; k < n_inst; k++) {
         int s = game->score(gs[k]);
         if (!m || s > best) {
@@ -421,6 +482,12 @@ static void countdown(void)
     for (int r = 0; r < n_regions(); r++) {
         region_band(r, -5 * scale / 2 - 2, 5 * scale + 4);
         region_text(r, -5 * scale / 2, scale, gfx_hsv(timer * 3, 200, 255), buf);
+    }
+    if (cup_active) {
+        char label[32];
+        snprintf(label, sizeof(label), "CUP %d/%d %s", cup_round, CUP_ROUNDS, menu[cup_last].name);
+        gfx_darken(0, 0, HUB75_W, 7);
+        gfx_text_center(64, 1, 1, C_WHITE, label);
     }
     if (++timer >= COUNTDOWN_TICKS) {
         state = S_PLAY; // no fade
@@ -449,7 +516,7 @@ static void play(void)
             set_state(S_RESULT);
         }
     } else {
-        uint8_t won_mask = 0;
+        player_mask_t won_mask = 0;
         int alive = 0, last = 0;
         for (int k = 0; k < n_inst; k++) {
             if (!over[k]) {
@@ -492,7 +559,7 @@ static void pause_screen(void)
 
     draw_game();
     char title[10] = "PAUSED";
-    uint8_t lost = players & ~connected_mask();
+    player_mask_t lost = players & ~connected_mask();
     if (lost)
         snprintf(title, sizeof(title), "P%d LOST", __builtin_ctz(lost) + 1);
     for (int r = 0; r < n_regions(); r++) {
@@ -512,6 +579,10 @@ static void result_screen(void)
 
     uint8_t pressed = pressed_any(players);
     if (timer > 25 && (pressed & BTN_A)) {
+        if (cup_active) {
+            if (cup_round < CUP_ROUNDS) cup_round++;
+            else cup_active = false;
+        }
         start_game();
         return;
     }
@@ -520,7 +591,7 @@ static void result_screen(void)
         return;
     }
 
-    char buf[20];
+    char buf[32];
     int big = screen_h == 128 ? 3 : 2;
     int pulse = 30 + (int)(t % 50 < 25 ? t % 25 : 25 - t % 25) * 2;
 
@@ -557,28 +628,44 @@ static void result_screen(void)
         if (winners == 0) {
             gfx_text_center(64, cy - 18, 2, C_YELLOW, "DRAW");
         } else {
-            // "P1 P3 WIN", each name in its color
             int n = __builtin_popcount(winners);
-            int x = 64 - (n * 12 + gfx_text_width(2, "WIN")) / 2;
-            for (int p = 0; p < MAX_PLAYERS; p++) {
-                if (!((winners >> p) & 1))
-                    continue;
-                snprintf(buf, sizeof(buf), "P%d", p + 1);
-                gfx_text(x, cy - 15, 1, player_color[p], buf);
-                x += 12;
+            if (n == 1) {
+                int p = __builtin_ctz(winners);
+                snprintf(buf, sizeof(buf), "P%d WIN", p + 1);
+                gfx_text_center(64, cy - 18, 2, player_color[p], buf);
+            } else {
+                gfx_text_center(64, cy - 18, 2, C_GREEN, "TEAM WIN");
             }
-            gfx_text(x, cy - 18, 2, C_GREEN, "WIN");
         }
+        int slot = 0;
         for (int p = 0; p < MAX_PLAYERS; p++) {
-            if (!((players >> p) & 1))
-                continue;
+            if (!(players & (1u << p))) continue;
             snprintf(buf, sizeof(buf), "P%d %d", p + 1, player_score(p));
-            gfx_text_center(16 + p * 32, cy + 2, 1, player_color[p], buf);
+            gfx_text_center(16 + (slot % 4) * 32, cy - 5 + (slot / 4) * 7,
+                            1, winners & (1u << p) ? C_WHITE : player_color[p], buf);
+            slot++;
         }
+    }
+    if (cup_active) {
+        ambient_plasma(t, MENU_BG);
+        snprintf(buf, sizeof(buf), "CUP %d/%d", cup_round, CUP_ROUNDS);
+        gfx_text_center(64, 2, 2, C_WHITE, buf);
+        int best = -1, slot = 0;
+        for (int p = 0; p < MAX_PLAYERS; p++)
+            if ((cup_players & (1u << p)) && cup_points[p] > best) best = cup_points[p];
+        for (int p = 0; p < MAX_PLAYERS; p++) if (cup_players & (1u << p)) {
+            snprintf(buf, sizeof(buf), "P%d %d", p + 1, cup_points[p]);
+            int y = 19 + (slot / 4) * 9;
+            gfx_text_center(16 + (slot % 4) * 32, y, 1,
+                            cup_points[p] == best ? C_WHITE : player_color[p], buf);
+            slot++;
+        }
+        gfx_text_center(64, screen_h - 18, 1, C_YELLOW,
+                        cup_round == CUP_ROUNDS ? "FINAL STANDINGS" : "WIN 3 PTS REST 1");
     }
     if (timer > 25) {
         gfx_darken(0, screen_h - 9, HUB75_W, 9);
-        gfx_text_center(64, screen_h - 7, 1, C_GRAY, "A AGAIN   B MENU");
+        gfx_text_center(64, screen_h - 7, 1, C_GRAY, cup_active && cup_round < CUP_ROUNDS ? "A NEXT   B MENU" : "A AGAIN   B MENU");
     }
 }
 
@@ -586,6 +673,7 @@ static void game_task(void *arg)
 {
     TickType_t last = xTaskGetTickCount();
     int64_t worst = 0;
+    int late = 0;
     while (1) {
         int64_t start = esp_timer_get_time();
         for (int p = 0; p < MAX_PLAYERS; p++)
@@ -600,6 +688,10 @@ static void game_task(void *arg)
         case S_PAUSE: pause_screen(); break;
         case S_RESULT: result_screen(); break;
         case S_AMBIENT: ambient_mode(); break;
+        case S_SCHOOL:
+            if (pressed_any(ALL_PLAYERS)) set_state(S_MAIN);
+            else school_show(t);
+            break;
         case S_SETTINGS: settings_menu(); break;
         case S_PANELTEST: panel_test(); break;
         }
@@ -612,9 +704,13 @@ static void game_task(void *arg)
         int64_t took = esp_timer_get_time() - start;
         if (took > worst)
             worst = took;
+        if (took > FRAME_MS * 1000) late++;
         if (t % 500 == 0) {
-            ESP_LOGI("main", "worst frame %d us", (int)worst);
+            ESP_LOGI("main", "worst frame %d us, late %d/500, heap %u, min %u",
+                     (int)worst, late, (unsigned)esp_get_free_heap_size(),
+                     (unsigned)esp_get_minimum_free_heap_size());
             worst = 0;
+            late = 0;
         }
         t++;
         vTaskDelayUntil(&last, pdMS_TO_TICKS(FRAME_MS));

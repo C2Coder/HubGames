@@ -22,6 +22,7 @@
 #include "input.h"
 
 #define GAME_STATE_MAX 16384
+#define PANEL_STATE_MAX 9216 // compact state for each individual 64x64 game
 
 typedef enum { GAME_RUNNING, GAME_OVER, GAME_WON } game_status_t;
 
@@ -36,16 +37,17 @@ typedef enum { BIG_NATIVE, BIG_SCALE2 } big_t;
 typedef struct {
     vs_rule_t vs_rule;
     bool shared;
+    bool opaque; // draw covers its view or intentionally uses a black background
     big_t big;
-    void (*init)(void *s, view_t v, uint8_t players, bool versus);
+    uint8_t max_players; // shared games: 0 = MAX_PLAYERS
+    void (*init)(void *s, view_t v, player_mask_t players, bool versus);
     game_status_t (*update)(void *s, const input_t *in); // every 20 ms
     void (*draw)(const void *s);
     int (*score)(const void *s);                // not shared
     int (*score_of)(const void *s, int player); // shared
-    uint8_t (*winners)(const void *s);          // shared, mask of winning players, 0 = draw
+    player_mask_t (*winners)(const void *s);          // shared, mask of winning players, 0 = draw
 } game_t;
 
-extern const uint16_t player_color[MAX_PLAYERS];
 
 extern const game_t game_snake;
 extern const game_t game_snake_arena;
@@ -53,3 +55,12 @@ extern const game_t game_tetris;
 extern const game_t game_pong;
 extern const game_t game_dk;
 extern const game_t game_mario;
+
+extern const game_t game_bomber;
+extern const game_t game_tron;
+extern const game_t game_racers;
+extern const game_t game_football;
+
+extern const game_t game_towers;
+
+extern const game_t game_fps;

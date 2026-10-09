@@ -45,7 +45,7 @@ typedef struct {
     barrel_t b[MAX_BARREL];
 } dk_t;
 
-_Static_assert(sizeof(dk_t) <= GAME_STATE_MAX, "dk state too big");
+_Static_assert(sizeof(dk_t) <= PANEL_STATE_MAX, "dk state too big");
 
 static uint32_t shared_seed = 1;
 static int seed_player = -1;
@@ -92,7 +92,7 @@ static void respawn(dk_t *s)
     s->state_t = 0;
 }
 
-static void init(void *p, view_t v, uint8_t players, bool versus)
+static void init(void *p, view_t v, player_mask_t players, bool versus)
 {
     dk_t *s = p;
     memset(s, 0, sizeof(*s));

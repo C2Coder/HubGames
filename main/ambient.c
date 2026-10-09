@@ -5,13 +5,14 @@
 #include <math.h>
 #include <stdbool.h>
 #include <string.h>
+#include <stdlib.h>
 #include "esp_random.h"
 #include "gfx.h"
 
 #define W     HUB75_W
 #define SLOT  600 // frames per effect (12 s)
 #define FADE  40  // fade in/out frames
-#define N_FX  8
+#define N_FX  14
 #define QN    72 // tunnel quadrant table size
 
 static int8_t sin8[256];        // -127..127, full circle in 256
@@ -468,6 +469,135 @@ static void fx_fireworks(uint32_t t, bool fresh)
     }
 }
 
+// ---------------------------------------------------------------- aurora / synthwave / kaleidoscope / ripples / galaxy / lasers
+
+static void fx_aurora(uint32_t t)
+{
+    int h = screen_h;
+    for (int x = 0; x < W; x++) {
+        int crest = h / 3 + (sin8[(x * 3 + t) & 255] * (h / 5) >> 7)
+                            + (sin8[(x * 7 - t * 2) & 255] * (h / 10) >> 7);
+        int hue = 80 + (sin8[(x * 2 + t / 3) & 255] >> 2);
+        for (int y = 0; y < h; y++) {
+            int d = y - crest;
+            int v = d < 0 ? 210 + d * 18 : 210 - d * 6;
+            v = clampi(v, 0, 255);
+            v = v * (160 + (sin8[(x * 13 + t * 2) & 255] >> 1)) >> 8;
+            hub75_fb[y][x] = shade(hue_pal[(hue + y / 3) & 255], v);
+        }
+    }
+    for (int i = 0; i < 60; i++) { // stable, twinkling sky
+        int x = (i * 47 + i * i * 3) % W, y = (i * 29 + i * i) % (h / 3);
+        put(x, y, shade(C_WHITE, 100 + (sin8[(t + i * 19) & 255] + 127) / 2));
+    }
+}
+
+static void fx_synthwave(uint32_t t)
+{
+    int h = screen_h, horizon = h * 9 / 16, sun_y = horizon - h / 6;
+    for (int y = 0; y < h; y++) {
+        if (y < horizon) {
+            int dy = y - sun_y, radius = h / 4;
+            int half = 0;
+            // Width table from one integer square-root scan per row (no floating point).
+            while ((half + 1) * (half + 1) + dy * dy <= radius * radius) half++;
+            uint16_t sky = rgb565(8 + y / 4, 0, 24 + y / 3);
+            uint16_t sun = shade(hue_pal[(6 + (y - sun_y + radius) * 2) & 255], 235);
+            for (int x = 0; x < W; x++)
+                hub75_fb[y][x] = half && x >= 64 - half && x <= 64 + half &&
+                    (y < sun_y || (y + (int)t / 8) % 5 < 3) ? sun : sky;
+        } else {
+            int depth = y - horizon + 1;
+            int z = 1800 / depth + t * 3;
+            bool stripe = (z & 127) < 12;
+            int offset = sin8[(t / 3) & 255] / 8;
+            int perspective = 65536 / depth;
+            for (int x = 0; x < W; x++) {
+                int lane = (x - 64 + offset) * perspective >> 10;
+                int edge = lane & 127;
+                bool grid = stripe || edge < 5;
+                hub75_fb[y][x] = grid ? shade(C_PINK, 100 + depth * 155 / (h - horizon)) : RGB(4, 0, 14);
+            }
+        }
+    }
+    // Animated mountain silhouette at the horizon.
+    for (int x = 0; x < W; x++) {
+        int peak = 3 + ((sin8[(x * 11) & 255] + 127) >> 4);
+        for (int y = horizon - peak; y < horizon; y++) put(x, y, RGB(8, 0, 20));
+        put(x, horizon - peak, RGB(96, 0, 160));
+    }
+}
+
+static void fx_kaleido(uint32_t t)
+{
+    int h = screen_h;
+    for (int y = 0; y < h; y++) {
+        int ay = y < h / 2 ? h / 2 - y - 1 : y - h / 2;
+        for (int x = 0; x < W; x++) {
+            int ax = x < 64 ? 63 - x : x - 64;
+            int r = qrad[ay][ax], a = qang[ay][ax];
+            int fold = sin8[(a * 12 + t) & 255];
+            int wave = sin8[(r * 5 + fold / 2 - t * 3) & 255];
+            hub75_fb[y][x] = shade(hue_pal[(r * 2 + fold + t) & 255], 128 + wave);
+        }
+    }
+}
+
+static void fx_ripples(uint32_t t)
+{
+    int h = screen_h, cx = 64 + sin8[(t / 2) & 255] / 8;
+    int cy = h / 2 + sin8[(t / 3 + 64) & 255] / 8;
+    for (int y = 0; y < h; y++) {
+        int ay = clampi(abs(y - cy), 0, QN - 1), by = abs(y - h / 2);
+        for (int x = 0; x < W; x++) {
+            int ax = clampi(abs(x - cx), 0, QN - 1), bx = abs(x - 64);
+            int w1 = sin8[(qrad[ay][ax] * 5 - t * 3) & 255];
+            int w2 = sin8[(qrad[by][bx] * 7 + t * 2) & 255];
+            int v = (w1 + w2 + 254) / 2;
+            hub75_fb[y][x] = shade(hue_pal[(160 + (w1 - w2) / 4 + t / 3) & 255], v);
+        }
+    }
+}
+
+static void fx_galaxy(uint32_t t)
+{
+    int h = screen_h;
+    for (int y = 0; y < h; y++) {
+        int dy = y - h / 2, ay = dy < 0 ? -dy - 1 : dy;
+        for (int x = 0; x < W; x++) {
+            int dx = x - 64, ax = dx < 0 ? -dx - 1 : dx;
+            int a = qang[ay][ax], r = qrad[ay][ax];
+            int angle = dx >= 0 ? (dy >= 0 ? a : 256 - a) : (dy >= 0 ? 128 - a : 128 + a);
+            int arms = sin8[(angle * 3 - r * 4 + t * 2) & 255] + 127;
+            int glow = clampi(255 - r * 2, 0, 255);
+            int v = glow * arms >> 8;
+            if (r < 12) v = clampi(v + (12 - r) * 20, 0, 255);
+            hub75_fb[y][x] = shade(hue_pal[(185 + r / 3 + t / 4) & 255], v);
+        }
+    }
+    for (int i = 0; i < 80; i++)
+        put((i * 71 + i * i * 7) % W, (i * 53 + i * i * 3) % h,
+            shade(C_WHITE, 60 + (sin8[(t + i * 31) & 255] + 127) / 3));
+}
+
+static void fx_lasers(uint32_t t, bool fresh)
+{
+    int h = screen_h;
+    if (fresh) memset(st.heat, 0, sizeof(st.heat));
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < W; x++) st.heat[y][x] = st.heat[y][x] * 235 >> 8;
+    for (int i = 0; i < 384; i++) {
+        int a = i * 256 / 384;
+        int x = 64 + (sin8[(a * 3 + t * 2) & 255] * 59 >> 7);
+        int y = h / 2 + (sin8[(a * 2 - t) & 255] * (h / 2 - 3) >> 7);
+        st.heat[y][x] = 255;
+        if (x + 1 < W) st.heat[y][x + 1] = 200;
+    }
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < W; x++)
+            hub75_fb[y][x] = shade(hue_pal[(x + y + t * 2) & 255], st.heat[y][x]);
+}
+
 // ---------------------------------------------------------------- show
 
 static void fade_fb(int f) // f 0..256
@@ -483,7 +613,7 @@ static void fade_fb(int f) // f 0..256
 void ambient_show(uint32_t t)
 {
     static int cur = -1, last_h;
-    static const uint8_t order[N_FX] = {0, 5, 2, 1, 4, 6, 3, 7};
+    static const uint8_t order[N_FX] = {0, 8, 2, 9, 5, 10, 1, 11, 6, 12, 3, 13, 4, 7};
     if (!ready) init_tables();
     int slot = (t / SLOT) % N_FX;
     uint32_t lt = t % SLOT;
@@ -498,7 +628,13 @@ void ambient_show(uint32_t t)
     case 4: fx_tunnel(t); break;
     case 5: fx_life(t, fresh); break;
     case 6: fx_balls(t); break;
-    default: fx_fireworks(t, fresh); break;
+    case 7: fx_fireworks(t, fresh); break;
+    case 8: fx_aurora(t); break;
+    case 9: fx_synthwave(t); break;
+    case 10: fx_kaleido(t); break;
+    case 11: fx_ripples(t); break;
+    case 12: fx_galaxy(t); break;
+    default: fx_lasers(t, fresh); break;
     }
     if (lt < FADE) fade_fb(lt * 256 / FADE);
     else if (lt >= SLOT - FADE) fade_fb((SLOT - 1 - lt) * 256 / FADE);

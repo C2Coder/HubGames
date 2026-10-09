@@ -4,7 +4,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define MAX_PLAYERS 4
+#define MAX_PLAYERS 12
+#define MAX_GAME_INSTANCES 4 // one instance per physical panel
+
+typedef uint16_t player_mask_t;
+#define ALL_PLAYERS ((player_mask_t)((1u << MAX_PLAYERS) - 1u))
+_Static_assert(MAX_PLAYERS <= 16, "player mask too small");
 
 enum {
     BTN_UP = 1,
@@ -25,3 +30,6 @@ typedef struct {
 
 // Call once per frame for each player (0 = P1 .. 3 = P4).
 void input_get(int player, input_t *in);
+
+// Shared by the LED renderer and controller replies; phones receive the exact RGB565 color.
+extern const uint16_t player_color[MAX_PLAYERS];
