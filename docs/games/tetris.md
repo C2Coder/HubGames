@@ -17,6 +17,8 @@ Cell = 3 px, board = 30x60 px, 1 px dark border around it. Locked cells are draw
 - Left (x+2..x+44): `SCORE`, value at scale 2 (5 digits = 40 px), `LINES`, `LEVEL`.
 - Right (x+84..x+126): `NEXT` with preview in 3 px cells.
 
+Built as described, with these details: rotation uses a runtime 4x4 box rotation (O does not rotate, I uses a 4 box, others 3) instead of a table; kicks tried are 0, -1, +1, -2, +2. The 64x64 view shows NEXT preview, score, `LVn`, `Ln` and the P1/P2 tag; `score_of`/`winners` are not set (not shared). Result is `GAME_OVER` only (no `GAME_WON`). Active piece uses a brighter colour than locked cells.
+
 Piece colours: I cyan, O yellow, T purple, S green, Z red, J blue, L orange (all RGB565 constants in the file).
 
 ## Controls
