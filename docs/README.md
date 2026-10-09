@@ -45,7 +45,7 @@ With nobody connected the panels run the ambient show with join info. 4 panels =
 | Pocket Racers | 2–8 | Left/right steer; A uses an item; hold B while turning to drift. Automatic throttle. |
 | Pixel Football | 2–12 | Directions/stick move; A kicks; hold B to sprint. Alternating entrants form balanced teams. |
 | Tricky Towers | 2–8 | Left/right move; A rotates; B drops; down soft-drops. Build to the dotted line. |
-| Micro FPS | 1; 2 in per-panel versus | Stick moves and turns; hold A to shoot; hold B for strafing. |
+| Micro FPS | 1 in regular firmware; 2 in per-panel versus | Stick moves and turns; hold A to shoot; hold B for strafing. |
 | Party Cup | 2–12 | Five random eligible shared games. A advances between rounds. Win: 3 points; others: 1. |
 
 Games with a limit of eight use the first eight connected slots; the menu shows
@@ -121,8 +121,10 @@ Větev zachovává novější Tanky i port doomgeneric z `C2Coder/HubGames`.
 Tanky podporují 2–8 hráčů v aréně (tři vítězná kola) nebo singleplayer proti AI;
 A střílí. Masky, barvy a rozložení skóre fungují i pro připojené sloty P9–P12.
 
-Výchozí firmware obsahuje MICRO FPS a nevyžaduje PSRAM ani WAD. Plný DOOM
-je volitelný pro ESP32-S3 s octal PSRAM; jeho zdrojový port a WAD partition
+Singleplayer nabízí jednu variantu podle sestavení: výchozí MICRO FPS bez PSRAM
+a WAD, nebo plný DOOM při zapnutém `CONFIG_HUBGAMES_FULL_DOOM`. V sestavení s
+plným DOOMem zůstává MICRO FPS pouze ve VERSUS pro nezávislé panely.
+Plný DOOM je volitelný pro ESP32-S3 s octal PSRAM; jeho zdrojový port a WAD partition
 zůstávají v repozitáři. Nové sestavení s PSRAM:
 
 ```sh

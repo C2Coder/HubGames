@@ -58,7 +58,11 @@ static const struct {
     {"POCKET RACERS", &game_racers, M_VS | M_PARTY},
     {"PIXEL FOOTBALL", &game_football, M_VS | M_PARTY},
     {"TRICKY TOWERS", &game_towers, M_VS | M_PARTY},
+#ifdef CONFIG_HUBGAMES_FULL_DOOM
+    {"MICRO FPS", &game_fps, M_VS}, // singleplayer uses the full Doom engine
+#else
     {"MICRO FPS", &game_fps, M_SINGLE | M_VS},
+#endif
     {"PARTY CUP", NULL, M_PARTY},
 };
 #define MENU_N (int)(sizeof(menu) / sizeof(menu[0]))
