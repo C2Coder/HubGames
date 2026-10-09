@@ -100,10 +100,9 @@ HOST_SANITIZERS=undefined,bounds,object-size ./tools/test_host.sh
 Host checks exercise the real game/menu/drawing code, snake corpse collisions,
 FPS walls and shooting, all twelve slots and reconnects, unique colors, cup
 rosters, all 14 ambient effects, and the exact school color palette at both
-64- and 128-pixel heights. CI runs ASan + UBSan on Linux and builds the complete
-ESP32-S3 firmware with ESP-IDF 5.5.1, uploading flash artifacts. ESP calls in the
-network host test are fakes; radio capacity and frame timings still require the
-actual board and twelve phones.
+64- and 128-pixel heights. Run the checks and ESP-IDF 5.5.1 firmware builds
+locally using the commands above. ESP calls in the network host test are fakes;
+radio capacity and frame timings still require the actual board and twelve phones.
 
 ## Code
 
