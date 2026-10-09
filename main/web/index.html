@@ -23,10 +23,10 @@ html, body { height: 100%; background: #111; color: #eee; font-family: sans-seri
 .r { position: absolute; width: 23vh; height: 23vh; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9vh; font-weight: bold; color: #fff; }
 #a { right: 0; top: 2vh; background: #b22; }
 #b { left: 0; bottom: 2vh; background: #c80; }
-#doompad { display: grid; grid-template-columns: 19vh 26vh 19vh; grid-template-rows: 26vh 14vh; gap: 2vh; align-items: center; }
-#fire { height: 26vh; border-radius: 50%; background: #b22; color: #fff; font-size: 6vh; font-weight: bold; }
-#use { grid-column: 2; height: 12vh; background: #c80; color: #fff; font-size: 5vh; }
-.turn { height: 19vh; }
+#doompad { display: grid; grid-template-columns: 20vh 20vh; gap: 1.5vh; justify-items: center; align-items: center; }
+#fire { grid-column: 1 / 3; width: 26vh; height: 26vh; border-radius: 50%; background: #b22; color: #fff; font-size: 6vh; font-weight: bold; }
+#use { grid-column: 1 / 3; width: 30vh; height: 11vh; background: #c80; color: #fff; font-size: 5vh; }
+.turn { width: 20vh; height: 20vh; }
 #rot { display: none; height: 100%; align-items: center; justify-content: center; font-size: 6vw; color: #888; }
 @media (orientation: portrait) { #rot { display: flex; } #bar, #pad { display: none; } }
 </style>
@@ -46,7 +46,8 @@ html, body { height: 100%; background: #111; color: #eee; font-family: sans-seri
   <div id="right">
     <div id="ab"><div id="a" class="r" data-b="a">A</div><div id="b" class="r" data-b="b">B</div></div>
     <div id="doompad" class="hide">
-      <div class="k turn" data-b="left">&#9664;</div><div id="fire" class="k" data-b="a">FIRE</div><div class="k turn" data-b="right">&#9654;</div>
+      <div id="fire" class="k" data-b="a">FIRE</div>
+      <div class="k turn" data-b="left">&#9664;</div><div class="k turn" data-b="right">&#9654;</div>
       <div id="use" class="k" data-b="b">USE</div>
     </div>
   </div>
