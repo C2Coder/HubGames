@@ -1,23 +1,33 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_log.h"
+#include "esp_timer.h"
 
+#include "ambient.h"
+#include "fx.h"
 #include "game.h"
 #include "gfx.h"
 #include "hub75.h"
 #include "input.h"
 #include "net.h"
+#include "settings.h"
 
-#define BRIGHTNESS      128
 #define FRAME_MS        20
 #define COUNTDOWN_TICKS (3000 / FRAME_MS)
+#define FADE_TICKS      12
+#define MENU_BG         70 // ambient level behind menus
+#define GAME_BG         25 // ambient level behind games
 
 const uint16_t player_color[MAX_PLAYERS] = {C_GREEN, C_BLUE, C_YELLOW, C_PINK};
 
-enum { MODE_SINGLE, MODE_VS, MODE_PARTY, MODE_N };
+enum { MODE_SINGLE, MODE_VS, MODE_PARTY };
 enum { M_SINGLE = 1 << MODE_SINGLE, M_VS = 1 << MODE_VS, M_PARTY = 1 << MODE_PARTY };
 
-static const char *const mode_names[MODE_N] = {"1 PLAYER", "1V1", "PARTY"};
+// main menu, the first three are game modes
+enum { MAIN_SINGLE, MAIN_VS, MAIN_PARTY, MAIN_AMBIENT, MAIN_SETTINGS, MAIN_N };
+static const char *const main_items[MAIN_N] = {"1 PLAYER", "VERSUS", "PARTY", "AMBIENT", "SETTINGS"};
 
 static const struct {
     const char *name;
@@ -33,35 +43,39 @@ static const struct {
 };
 #define MENU_N (int)(sizeof(menu) / sizeof(menu[0]))
 
-enum { S_MODE, S_GAMES, S_COUNTDOWN, S_PLAY, S_PAUSE, S_RESULT };
+enum { SET_PANELS, SET_BRIGHT, SET_TEST, SET_N };
 
-static int state = S_MODE, mode, game_sel = 1, timer;
+enum { S_MAIN, S_GAMES, S_COUNTDOWN, S_PLAY, S_PAUSE, S_RESULT, S_AMBIENT, S_SETTINGS, S_PANELTEST };
+
+static uint32_t t; // frame counter
+static int state = S_MAIN, fade, timer;
+static int main_sel, mode, game_sel = 1, set_sel;
+static int bar_y = -1; // animated selection bar, 1/8 px
+static const game_t *game;
 static uint8_t players; // mask of players in the running game
 static uint8_t winners; // mask, 0 = draw
-static bool won, over[2];
-static const game_t *game;
-static uint8_t gs[2][GAME_STATE_MAX] __attribute__((aligned(4)));
+static bool won, scaled;
+
+// VERSUS per panel: instance k runs on panel k for player inst_player[k]
+static int n_inst;
+static int inst_player[MAX_PLAYERS];
+static bool over[MAX_PLAYERS];
+static uint8_t gs[MAX_PLAYERS][GAME_STATE_MAX] __attribute__((aligned(4)));
 static input_t in[MAX_PLAYERS];
 
-static bool per_panel(void)
+static void start_game(void);
+
+static void set_state(int s)
 {
-    return mode != MODE_SINGLE && !game->shared;
+    state = s;
+    fade = 0;
+    timer = 0;
+    bar_y = -1;
 }
 
-// text centered on the whole screen, or on each panel for per-panel games
-static void center_text(int y, int scale, uint16_t c, const char *s)
+static int text_scale(void)
 {
-    if (per_panel()) {
-        gfx_text_center(32, y, scale, c, s);
-        gfx_text_center(96, y, scale, c, s);
-    } else {
-        gfx_text_center(64, y, scale, c, s);
-    }
-}
-
-static bool in_mode(int i)
-{
-    return menu[i].modes & (1 << mode);
+    return screen_h == 128 ? 2 : 1;
 }
 
 static uint8_t connected_mask(void)
@@ -78,70 +92,129 @@ static bool players_ok(void)
     return (connected_mask() & players) == players;
 }
 
-static uint8_t pressed_any(void)
+static uint8_t pressed_any(uint8_t mask)
 {
     uint8_t b = 0;
     for (int p = 0; p < MAX_PLAYERS; p++)
-        if ((players >> p) & 1)
+        if ((mask >> p) & 1)
             b |= in[p].pressed;
     return b;
 }
 
-static void start_game(void)
+// ---- regions: one per panel instance, or the whole screen ----
+
+static bool per_panel(void)
 {
-    game = menu[game_sel].game;
-    players = mode == MODE_SINGLE ? 0x1 : mode == MODE_VS ? 0x3 : connected_mask();
-    if (mode == MODE_SINGLE) {
-        game->init(gs[0], (view_t){0, 0, 128, 64}, players, false);
-    } else if (game->shared) {
-        game->init(gs[0], (view_t){0, 0, 128, 64}, players, true);
-    } else {
-        game->init(gs[0], (view_t){0, 0, 64, 64}, 0x1, true);
-        game->init(gs[1], (view_t){64, 0, 64, 64}, 0x2, true);
+    return mode != MODE_SINGLE && !game->shared;
+}
+
+static int n_regions(void)
+{
+    return per_panel() ? n_inst : 1;
+}
+
+static view_t region(int r)
+{
+    if (!per_panel())
+        return (view_t){0, 0, HUB75_W, screen_h};
+    return (view_t){(r % 2) * 64, (r / 2) * 64, 64, 64};
+}
+
+// text centered horizontally in the region, dy from its vertical center
+static void region_text(int r, int dy, int scale, uint16_t c, const char *s)
+{
+    view_t v = region(r);
+    gfx_text_center(v.x + v.w / 2, v.y + v.h / 2 + dy, scale, c, s);
+}
+
+static void region_band(int r, int dy, int h)
+{
+    view_t v = region(r);
+    gfx_darken(v.x, v.y + v.h / 2 + dy, v.w, h);
+}
+
+// ---- menus ----
+
+// list over a darkened background with a sliding highlight bar
+static void draw_list(const char *const *items, int n, int sel, int y0)
+{
+    int scale = text_scale();
+    int pitch = scale == 2 ? 16 : 8, bar_h = 5 * scale + 3;
+    int target = (y0 + sel * pitch - 2) * 8;
+    if (bar_y < 0)
+        bar_y = target;
+    bar_y += (target - bar_y) / 3;
+    if (abs(target - bar_y) < 3)
+        bar_y = target;
+
+    gfx_darken(0, y0 - 2, HUB75_W, n * pitch + 1);
+    gfx_rect(8, bar_y / 8, HUB75_W - 16, bar_h, gfx_hsv(t / 2, 200, 90));
+    for (int i = 0; i < n; i++)
+        gfx_text_center(64, y0 + i * pitch, scale, i == sel ? C_WHITE : C_GRAY, items[i]);
+}
+
+static void draw_players_row(int y)
+{
+    int scale = text_scale();
+    char name[3] = {'P', 0, 0};
+    for (int p = 0; p < MAX_PLAYERS; p++) {
+        name[1] = '1' + p;
+        gfx_text(64 - 29 * scale + p * 15 * scale, y, scale, in[p].connected ? player_color[p] : C_DARK, name);
     }
-    over[0] = over[1] = false;
-    won = false;
-    timer = 0;
-    state = S_COUNTDOWN;
 }
 
-static void draw_game(void)
+// rainbow HUBGAMES and how to join, over the ambient show
+static void join_overlay(void)
 {
-    game->draw(gs[0]);
-    if (per_panel())
-        game->draw(gs[1]);
+    int big = screen_h == 128 ? 3 : 2;
+    int cy = screen_h / 2;
+    gfx_darken(0, cy - 15 - big * 5, HUB75_W, 34 + big * 5);
+    const char *title = "HUBGAMES";
+    int x = 64 - gfx_text_width(big, title) / 2;
+    for (int i = 0; title[i]; i++) {
+        char ch[2] = {title[i], 0};
+        gfx_text(x + i * 4 * big, cy - 12 - big * 5, big, gfx_hsv(t * 3 + i * 24, 220, 255), ch);
+    }
+    gfx_text_center(64, cy + 2, 1, C_WHITE, "JOIN WIFI HUBGAMES");
+    gfx_text_center(64, cy + 10, 1, (t / 25) % 2 ? C_YELLOW : C_WHITE, "OPEN 192.168.4.1");
 }
 
-static void mode_menu(void)
+static void main_menu(void)
 {
     if (!in[0].connected) {
-        gfx_text_center(64, 12, 1, C_GRAY, "WIFI");
-        gfx_text_center(64, 20, 1, C_WHITE, "HUBGAMES");
-        gfx_text_center(64, 36, 1, C_GRAY, "OPEN");
-        gfx_text_center(64, 44, 1, C_WHITE, "192.168.4.1");
+        ambient_show(t);
+        join_overlay();
         return;
     }
 
     if (in[0].pressed & BTN_UP)
-        mode = (mode + MODE_N - 1) % MODE_N;
+        main_sel = (main_sel + MAIN_N - 1) % MAIN_N;
     if (in[0].pressed & BTN_DOWN)
-        mode = (mode + 1) % MODE_N;
+        main_sel = (main_sel + 1) % MAIN_N;
     if (in[0].pressed & BTN_A) {
-        if (!in_mode(game_sel))
-            game_sel = 2; // snake arena is in every multiplayer mode
-        if (!in_mode(game_sel))
-            game_sel = 1;
-        state = S_GAMES;
+        if (main_sel == MAIN_AMBIENT) {
+            set_state(S_AMBIENT);
+        } else if (main_sel == MAIN_SETTINGS) {
+            set_state(S_SETTINGS);
+        } else {
+            mode = main_sel;
+            if (!(menu[game_sel].modes & (1 << mode)))
+                for (game_sel = 0; !(menu[game_sel].modes & (1 << mode)); game_sel++)
+                    ;
+            set_state(S_GAMES);
+        }
         return;
     }
 
-    for (int m = 0; m < MODE_N; m++)
-        gfx_text_center(64, 4 + m * 17, 2, m == mode ? C_WHITE : C_DARK, mode_names[m]);
-    char name[3] = {'P', 0, 0};
-    for (int p = 0; p < MAX_PLAYERS; p++) {
-        name[1] = '1' + p;
-        gfx_text(37 + p * 15, 58, 1, in[p].connected ? player_color[p] : C_DARK, name);
-    }
+    ambient_plasma(t, MENU_BG);
+    int scale = text_scale();
+    draw_list(main_items, MAIN_N, main_sel, scale == 2 ? 20 : 6);
+    draw_players_row(screen_h - 6 * scale);
+}
+
+static bool in_mode(int i)
+{
+    return menu[i].modes & (1 << mode);
 }
 
 static void games_menu(void)
@@ -151,63 +224,215 @@ static void games_menu(void)
     if (in[0].pressed & BTN_DOWN)
         do game_sel = (game_sel + 1) % MENU_N; while (!in_mode(game_sel));
     if (in[0].pressed & BTN_B) {
-        state = S_MODE;
+        set_state(S_MAIN);
         return;
     }
 
     int n = __builtin_popcount(connected_mask());
-    bool ready = mode == MODE_SINGLE || (mode == MODE_VS ? in[1].connected : n >= 2);
+    bool ready = mode == MODE_SINGLE || n >= 2;
     if ((in[0].pressed & BTN_A) && ready) {
         start_game();
         return;
     }
 
-    gfx_text_center(64, 1, 1, C_GRAY, mode_names[mode]);
-    for (int i = 0, row = 0; i < MENU_N; i++) {
+    // visible items and the selected row
+    const char *items[MENU_N];
+    int cnt = 0, sel = 0;
+    for (int i = 0; i < MENU_N; i++) {
         if (!in_mode(i))
             continue;
-        int y = 10 + row++ * 7;
-        gfx_text_center(64, y, 1, i == game_sel ? C_WHITE : C_GRAY, menu[i].name);
-        if (i == game_sel) {
-            int w = gfx_text_width(1, menu[i].name);
-            gfx_text(64 - w / 2 - 7, y, 1, C_YELLOW, ">");
-            gfx_text(64 + w / 2 + 4, y, 1, C_YELLOW, "<");
+        if (i == game_sel)
+            sel = cnt;
+        items[cnt++] = menu[i].name;
+    }
+
+    int scale = text_scale();
+    ambient_plasma(t, MENU_BG);
+    gfx_text_center(64, scale, scale, C_GRAY, main_items[mode]);
+    draw_list(items, cnt, sel, scale == 2 ? 20 : 9);
+
+    char buf[20];
+    int y = screen_h - 6 * scale;
+    if (!ready) {
+        gfx_text_center(64, y, scale, C_YELLOW, "NEED 2+ PLAYERS");
+    } else if (mode != MODE_SINGLE) {
+        int max = menu[game_sel].game->shared ? MAX_PLAYERS : hub75_panels;
+        snprintf(buf, sizeof(buf), "%d PLAYERS", n < max ? n : max);
+        gfx_text_center(64, y, scale, C_GRAY, buf);
+    }
+}
+
+static void settings_menu(void)
+{
+    if (in[0].pressed & BTN_UP)
+        set_sel = (set_sel + SET_N - 1) % SET_N;
+    if (in[0].pressed & BTN_DOWN)
+        set_sel = (set_sel + 1) % SET_N;
+    if (in[0].pressed & BTN_B) {
+        set_state(S_MAIN);
+        return;
+    }
+
+    int dir = (in[0].pressed & BTN_RIGHT) ? 1 : (in[0].pressed & BTN_LEFT) ? -1 : 0;
+    bool a = in[0].pressed & BTN_A;
+    if (set_sel == SET_PANELS && (dir || a)) {
+        set_panels = set_panels == 4 ? 2 : 4;
+        hub75_set_panels(set_panels);
+        settings_save();
+        bar_y = -1;
+    } else if (set_sel == SET_BRIGHT && dir) {
+        int b = set_brightness + dir * 16;
+        set_brightness = b < 16 ? 16 : b > 255 ? 255 : b;
+        settings_save();
+    } else if (set_sel == SET_TEST && a) {
+        set_state(S_PANELTEST);
+        return;
+    }
+
+    char panels[16], bright[20];
+    snprintf(panels, sizeof(panels), "< PANELS %d >", set_panels);
+    snprintf(bright, sizeof(bright), "< LIGHT %d >", set_brightness * 100 / 255);
+    const char *items[SET_N] = {panels, bright, "PANEL TEST"};
+
+    int scale = text_scale();
+    ambient_plasma(t, MENU_BG);
+    gfx_text_center(64, scale, scale, C_GRAY, "SETTINGS");
+    draw_list(items, SET_N, set_sel, scale == 2 ? 30 : 16);
+}
+
+static void panel_test(void)
+{
+    if (pressed_any(0xf)) {
+        set_state(S_SETTINGS);
+        return;
+    }
+    for (int p = 0; p < hub75_panels; p++) {
+        int x = (p % 2) * 64, y = (p / 2) * 64;
+        uint16_t c = gfx_hsv(p * 64, 255, 255);
+        gfx_rect(x, y, 64, 1, c);
+        gfx_rect(x, y + 63, 64, 1, c);
+        gfx_rect(x, y, 1, 64, c);
+        gfx_rect(x + 63, y, 1, 64, c);
+        char num[2] = {'1' + p, 0};
+        gfx_text_center(x + 32, y + 14, 7, c, num);
+        gfx_text_center(x + 32, y + 3, 1, C_WHITE, "TOP");
+    }
+}
+
+static void ambient_mode(void)
+{
+    if (pressed_any(0xf)) {
+        set_state(S_MAIN);
+        return;
+    }
+    ambient_show(t);
+    if (t % 750 < 250) // join info 5 s out of every 15 s
+        join_overlay();
+}
+
+// ---- games ----
+
+static void start_game(void)
+{
+    game = menu[game_sel].game;
+    uint8_t conn = connected_mask();
+    scaled = false;
+    fx_scale = 1;
+    fx_clear();
+
+    if (mode == MODE_SINGLE) {
+        players = 0x1;
+        view_t v = {0, 0, HUB75_W, screen_h};
+        if (screen_h == 128 && game->big == BIG_SCALE2) {
+            v = (view_t){0, 0, 64, 64};
+            scaled = true;
+            fx_scale = 2;
+        }
+        game->init(gs[0], v, players, false);
+    } else if (game->shared) {
+        players = conn; // everyone connected plays
+        game->init(gs[0], (view_t){0, 0, HUB75_W, screen_h}, players, true);
+    } else {
+        // one panel per player, as many as there are panels
+        players = 0;
+        n_inst = 0;
+        for (int p = 0; p < MAX_PLAYERS && n_inst < hub75_panels; p++) {
+            if (!((conn >> p) & 1))
+                continue;
+            players |= 1 << p;
+            inst_player[n_inst] = p;
+            over[n_inst] = false;
+            game->init(gs[n_inst], region(n_inst), 1 << p, true);
+            n_inst++;
         }
     }
-    if (!ready)
-        gfx_text_center(64, 57, 1, C_YELLOW, mode == MODE_VS ? "WAITING FOR P2" : "NEED 2+ PLAYERS");
-    else if (mode == MODE_PARTY) {
-        char buf[16];
-        snprintf(buf, sizeof(buf), "%d PLAYERS", n);
-        gfx_text_center(64, 57, 1, C_GRAY, buf);
+    won = false;
+    winners = 0;
+    set_state(S_COUNTDOWN);
+}
+
+static void draw_game(void)
+{
+    ambient_plasma(t, GAME_BG);
+    if (per_panel()) {
+        for (int k = 0; k < n_inst; k++)
+            game->draw(gs[k]);
+    } else {
+        game->draw(gs[0]);
+        if (scaled)
+            gfx_scale2();
     }
+}
+
+static int player_score(int p)
+{
+    if (game->shared)
+        return game->score_of(gs[0], p);
+    if (mode == MODE_SINGLE)
+        return game->score(gs[0]);
+    for (int k = 0; k < n_inst; k++)
+        if (inst_player[k] == p)
+            return game->score(gs[k]);
+    return 0;
+}
+
+// players with the best score, 0 if everyone ties
+static uint8_t best_score(void)
+{
+    int best = 0;
+    uint8_t m = 0;
+    for (int k = 0; k < n_inst; k++) {
+        int s = game->score(gs[k]);
+        if (!m || s > best) {
+            best = s;
+            m = 0;
+        }
+        if (s == best)
+            m |= 1 << inst_player[k];
+    }
+    return m == players ? 0 : m;
 }
 
 static void countdown(void)
 {
     draw_game();
     char buf[2] = {'3' - timer * 3 / COUNTDOWN_TICKS, 0};
-    if (per_panel()) {
-        gfx_rect(26, 22, 13, 22, C_BLACK);
-        gfx_rect(90, 22, 13, 22, C_BLACK);
-    } else {
-        gfx_rect(58, 22, 13, 22, C_BLACK);
+    int scale = screen_h == 128 && !per_panel() ? 6 : 4;
+    for (int r = 0; r < n_regions(); r++) {
+        region_band(r, -5 * scale / 2 - 2, 5 * scale + 4);
+        region_text(r, -5 * scale / 2, scale, gfx_hsv(timer * 3, 200, 255), buf);
     }
-    center_text(23, 4, C_WHITE, buf);
-    if (++timer >= COUNTDOWN_TICKS)
-        state = S_PLAY;
-}
-
-// higher score wins, equal = draw
-static uint8_t by_score(int s0, int s1)
-{
-    return s0 > s1 ? 0x1 : s1 > s0 ? 0x2 : 0;
+    if (++timer >= COUNTDOWN_TICKS) {
+        state = S_PLAY; // no fade
+        timer = 0;
+    }
 }
 
 static void play(void)
 {
-    if (!players_ok() || (pressed_any() & BTN_START)) {
-        state = S_PAUSE;
+    if (!players_ok() || (pressed_any(players) & BTN_START)) {
+        set_state(S_PAUSE);
+        fade = FADE_TICKS;
         draw_game();
         return;
     }
@@ -216,32 +441,38 @@ static void play(void)
         game_status_t st = game->update(gs[0], &in[0]);
         if (st != GAME_RUNNING) {
             won = st == GAME_WON;
-            state = S_RESULT;
+            set_state(S_RESULT);
         }
     } else if (game->shared) {
         if (game->update(gs[0], in) != GAME_RUNNING) {
             winners = game->winners(gs[0]);
-            state = S_RESULT;
+            set_state(S_RESULT);
         }
     } else {
-        game_status_t st[2] = {GAME_RUNNING, GAME_RUNNING};
-        for (int p = 0; p < 2; p++)
-            if (!over[p]) {
-                st[p] = game->update(gs[p], &in[p]);
-                over[p] = st[p] != GAME_RUNNING;
+        uint8_t won_mask = 0;
+        int alive = 0, last = 0;
+        for (int k = 0; k < n_inst; k++) {
+            if (!over[k]) {
+                game_status_t st = game->update(gs[k], &in[inst_player[k]]);
+                if (st == GAME_WON)
+                    won_mask |= 1 << inst_player[k];
+                over[k] = st != GAME_RUNNING;
             }
+            if (!over[k]) {
+                alive++;
+                last = inst_player[k];
+            }
+        }
 
-        bool w0 = st[0] == GAME_WON, w1 = st[1] == GAME_WON;
-        bool done = game->vs_rule == VS_FIRST_DEATH ? (over[0] || over[1]) : (over[0] && over[1]);
-        if (w0 || w1) {
-            winners = w0 && w1 ? by_score(game->score(gs[0]), game->score(gs[1])) : w0 ? 0x1 : 0x2;
-            state = S_RESULT;
-        } else if (done) {
-            if (game->vs_rule == VS_FIRST_DEATH && over[0] != over[1])
-                winners = over[0] ? 0x2 : 0x1;
-            else
-                winners = by_score(game->score(gs[0]), game->score(gs[1]));
-            state = S_RESULT;
+        if (won_mask) {
+            winners = won_mask;
+            set_state(S_RESULT);
+        } else if (game->vs_rule == VS_FIRST_DEATH && alive <= 1) {
+            winners = alive == 1 ? 1 << last : best_score();
+            set_state(S_RESULT);
+        } else if (alive == 0) {
+            winners = best_score();
+            set_state(S_RESULT);
         }
     }
     draw_game();
@@ -249,111 +480,143 @@ static void play(void)
 
 static void pause_screen(void)
 {
-    uint8_t pressed = pressed_any();
+    uint8_t pressed = pressed_any(players);
     if ((pressed & (BTN_A | BTN_START)) && players_ok()) {
         state = S_PLAY;
         return;
     }
     if (pressed & BTN_B) {
-        state = S_GAMES;
+        set_state(S_GAMES);
         return;
     }
 
     draw_game();
-    gfx_rect(0, 18, HUB75_W, 30, C_BLACK);
     char title[10] = "PAUSED";
     uint8_t lost = players & ~connected_mask();
     if (lost)
         snprintf(title, sizeof(title), "P%d LOST", __builtin_ctz(lost) + 1);
-    center_text(20, 1, lost ? C_RED : C_WHITE, title);
-    center_text(32, 1, C_GRAY, "A RESUME");
-    center_text(40, 1, C_GRAY, "B QUIT");
-}
-
-static int player_score(int p)
-{
-    return game->shared ? game->score_of(gs[0], p) : game->score(gs[p]);
+    for (int r = 0; r < n_regions(); r++) {
+        region_band(r, -13, 27);
+        region_text(r, -11, 1, lost ? C_RED : C_WHITE, title);
+        region_text(r, 0, 1, C_GRAY, "A RESUME");
+        region_text(r, 7, 1, C_GRAY, "B QUIT");
+    }
 }
 
 static void result_screen(void)
 {
-    uint8_t pressed = pressed_any();
-    if (pressed & BTN_A) {
+    bool party_win = won || winners;
+    if (party_win && (timer == 0 || timer == 50))
+        fx_confetti(60);
+    timer++;
+
+    uint8_t pressed = pressed_any(players);
+    if (timer > 25 && (pressed & BTN_A)) {
         start_game();
         return;
     }
-    if (pressed & BTN_B) {
-        state = S_GAMES;
+    if (timer > 25 && (pressed & BTN_B)) {
+        set_state(S_GAMES);
         return;
     }
 
-    char buf[16];
+    char buf[20];
+    int big = screen_h == 128 ? 3 : 2;
+    int pulse = 30 + (int)(t % 50 < 25 ? t % 25 : 25 - t % 25) * 2;
+
     if (mode == MODE_SINGLE) {
-        if (won)
-            gfx_text_center(64, 12, 2, C_GREEN, "YOU WIN");
-        else
-            gfx_text_center(64, 12, 2, C_RED, "GAME OVER");
+        if (won) {
+            ambient_plasma(t, MENU_BG);
+            region_band(0, -18, 34);
+            region_text(0, -15, big, C_GREEN, "YOU WIN");
+        } else {
+            gfx_rect(0, 0, HUB75_W, screen_h, RGB(pulse, 0, 0));
+            region_text(0, -15, big, C_RED, "GAME OVER");
+        }
         snprintf(buf, sizeof(buf), "SCORE %d", game->score(gs[0]));
-        gfx_text_center(64, 32, 1, C_WHITE, buf);
-        gfx_text_center(64, 52, 1, C_GRAY, "A AGAIN B MENU");
-    } else if (mode == MODE_VS) {
-        for (int p = 0; p < 2; p++) {
-            int cx = 32 + p * 64;
-            if (winners == 0)
-                gfx_text_center(cx, 12, 2, C_YELLOW, "DRAW");
-            else if ((winners >> p) & 1)
-                gfx_text_center(cx, 12, 2, C_GREEN, "WIN");
+        region_text(0, 5 * big - 8, 1, C_WHITE, buf);
+    } else if (per_panel()) {
+        ambient_plasma(t, MENU_BG);
+        for (int k = 0; k < n_inst; k++) {
+            int p = inst_player[k];
+            view_t v = region(k);
+            bool w = (winners >> p) & 1;
+            if (winners && !w)
+                gfx_rect(v.x, v.y, 64, 64, RGB(pulse, 0, 0));
             else
-                gfx_text_center(cx, 12, 2, C_RED, "LOSE");
+                gfx_darken(v.x, v.y + 16, 64, 28);
+            const char *res = winners == 0 ? "DRAW" : w ? "WIN" : "LOSE";
+            region_text(k, -14, 2, winners == 0 ? C_YELLOW : w ? C_GREEN : C_RED, res);
             snprintf(buf, sizeof(buf), "SCORE %d", player_score(p));
-            gfx_text_center(cx, 32, 1, player_color[p], buf);
-            gfx_text_center(cx, 52, 1, C_GRAY, "A AGAIN B MENU");
+            region_text(k, 2, 1, player_color[p], buf);
         }
     } else {
+        ambient_plasma(t, MENU_BG);
+        int cy = screen_h / 2;
+        gfx_darken(0, cy - 22, HUB75_W, 34);
         if (winners == 0) {
-            gfx_text_center(64, 8, 2, C_YELLOW, "DRAW");
+            gfx_text_center(64, cy - 18, 2, C_YELLOW, "DRAW");
         } else {
             // "P1 P3 WIN", each name in its color
             int n = __builtin_popcount(winners);
-            int w = n * 12 + gfx_text_width(2, "WIN");
-            int x = 64 - w / 2;
+            int x = 64 - (n * 12 + gfx_text_width(2, "WIN")) / 2;
             for (int p = 0; p < MAX_PLAYERS; p++) {
                 if (!((winners >> p) & 1))
                     continue;
                 snprintf(buf, sizeof(buf), "P%d", p + 1);
-                gfx_text(x, 11, 1, player_color[p], buf);
+                gfx_text(x, cy - 15, 1, player_color[p], buf);
                 x += 12;
             }
-            gfx_text(x, 8, 2, C_GREEN, "WIN");
+            gfx_text(x, cy - 18, 2, C_GREEN, "WIN");
         }
         for (int p = 0; p < MAX_PLAYERS; p++) {
             if (!((players >> p) & 1))
                 continue;
             snprintf(buf, sizeof(buf), "P%d %d", p + 1, player_score(p));
-            gfx_text_center(16 + p * 32, 32, 1, player_color[p], buf);
+            gfx_text_center(16 + p * 32, cy + 2, 1, player_color[p], buf);
         }
-        gfx_text_center(64, 52, 1, C_GRAY, "A AGAIN B MENU");
+    }
+    if (timer > 25) {
+        gfx_darken(0, screen_h - 9, HUB75_W, 9);
+        gfx_text_center(64, screen_h - 7, 1, C_GRAY, "A AGAIN   B MENU");
     }
 }
 
 static void game_task(void *arg)
 {
     TickType_t last = xTaskGetTickCount();
+    int64_t worst = 0;
     while (1) {
+        int64_t start = esp_timer_get_time();
         for (int p = 0; p < MAX_PLAYERS; p++)
             input_get(p, &in[p]);
         gfx_clear();
 
         switch (state) {
-        case S_MODE: mode_menu(); break;
+        case S_MAIN: main_menu(); break;
         case S_GAMES: games_menu(); break;
         case S_COUNTDOWN: countdown(); break;
         case S_PLAY: play(); break;
         case S_PAUSE: pause_screen(); break;
         case S_RESULT: result_screen(); break;
+        case S_AMBIENT: ambient_mode(); break;
+        case S_SETTINGS: settings_menu(); break;
+        case S_PANELTEST: panel_test(); break;
         }
+        fx_update_draw();
 
-        hub75_show(BRIGHTNESS);
+        if (fade < FADE_TICKS)
+            fade++;
+        hub75_show(set_brightness * fade / FADE_TICKS);
+
+        int64_t took = esp_timer_get_time() - start;
+        if (took > worst)
+            worst = took;
+        if (t % 500 == 0) {
+            ESP_LOGI("main", "worst frame %d us", (int)worst);
+            worst = 0;
+        }
+        t++;
         vTaskDelayUntil(&last, pdMS_TO_TICKS(FRAME_MS));
     }
 }
@@ -362,5 +625,7 @@ void app_main(void)
 {
     hub75_init();
     net_init();
+    settings_load();
+    hub75_set_panels(set_panels);
     xTaskCreatePinnedToCore(game_task, "game", 8192, NULL, 5, NULL, 1);
 }

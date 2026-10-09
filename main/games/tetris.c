@@ -25,7 +25,8 @@ static const uint16_t bright[8] = {0, RGB(120, 255, 255), RGB(255, 255, 100), RG
 static const uint8_t gravity[15] = {40, 34, 28, 23, 19, 15, 12, 9, 7, 5, 4, 3, 2, 2, 1};
 static const int points[5] = {0, 40, 100, 300, 1200};
 
-static uint32_t seed; // shared piece sequence, drawn by player 0
+static uint32_t seed; // shared piece sequence, drawn by the lowest player
+static int last_player = 99;
 
 typedef struct {
     view_t v;
@@ -114,8 +115,12 @@ static void spawn(tetris_t *s)
     s->y = 0;
     s->mask = rotated(s->id, 0);
     s->g_t = s->lock_t = s->resets = s->sd_t = 0;
-    if (collides(s, s->mask, s->x, s->y))
+    if (collides(s, s->mask, s->x, s->y)) {
         s->dead = true;
+        // explosion over the board
+        for (int i = 0; i < 6; i++)
+            fx_burst(s->bx + (i % 3) * 15 + 3, s->by + (i / 3) * 30 + 15, i % 2 ? C_RED : C_YELLOW, 14);
+    }
 }
 
 static void init(void *p, view_t v, uint8_t players, bool versus)
@@ -126,8 +131,9 @@ static void init(void *p, view_t v, uint8_t players, bool versus)
     s->player = __builtin_ctz(players);
     s->versus = versus;
     s->wide = v.w >= 128;
-    if (s->player == 0)
+    if (s->player <= last_player) // first instance of a new game
         seed = esp_random() | 1;
+    last_player = s->player;
     s->rng = seed;
     s->bag_i = 7;
     s->bx = s->wide ? v.x + 49 : v.x + 1;
@@ -188,9 +194,13 @@ static void lock_piece(tetris_t *s)
         if (full)
             s->clear_rows |= 1u << y;
     }
-    if (s->clear_rows)
+    if (s->clear_rows) {
         s->flash_t = FLASH_TICKS;
-    else
+        for (int y = 0; y < ROWS; y++)
+            if ((s->clear_rows >> y) & 1)
+                for (int x = 0; x < COLS; x += 2)
+                    fx_burst(s->bx + x * CELL + CELL, s->by + y * CELL + 1, bright[s->board[y][x] ? s->board[y][x] : 1], 3);
+    } else
         spawn(s);
 }
 
@@ -251,6 +261,9 @@ static game_status_t update(void *p, const input_t *in)
             s->y++;
             s->score += 2;
         }
+        for (int i = 0; i < 16; i++) // small burst under the piece
+            if ((s->mask & (1 << i)) && !(s->mask & (1 << (i + 4))))
+                fx_burst(s->bx + (s->x + (i & 3)) * CELL + 1, s->by + (s->y + (i >> 2) + 1) * CELL, bright[s->id + 1], 2);
         lock_piece(s);
         return GAME_RUNNING;
     }
@@ -330,6 +343,14 @@ static void draw(const void *p)
             }
     }
 
+    // dark panels behind the text so it reads over the ambient background
+    if (s->wide) {
+        gfx_rect(v->x, v->y, 47, 64, C_BLACK);
+        gfx_rect(v->x + 83, v->y, 45, 64, C_BLACK);
+    } else {
+        gfx_rect(v->x + 33, v->y, 31, 64, C_BLACK);
+    }
+
     if (s->wide) {
         int lx = v->x + 2, rx = v->x + 86;
         gfx_text(lx, v->y + 4, 1, C_GRAY, "SCORE");
@@ -353,7 +374,10 @@ static void draw(const void *p)
         snprintf(buf, sizeof(buf), "L%d", s->lines);
         gfx_text(rx, v->y + 36, 1, C_GRAY, buf);
         if (s->versus)
-            gfx_text(rx, v->y + 56, 1, player_color[s->player], s->player ? "P2" : "P1");
+        {
+            snprintf(buf, sizeof(buf), "P%d", s->player + 1);
+            gfx_text(rx, v->y + 56, 1, player_color[s->player], buf);
+        }
     }
 }
 
@@ -364,6 +388,7 @@ static int score(const void *p)
 
 const game_t game_tetris = {
     .vs_rule = VS_FIRST_DEATH,
+    .big = BIG_SCALE2,
     .init = init,
     .update = update,
     .draw = draw,

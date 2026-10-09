@@ -23,9 +23,13 @@ Tiles: ` ` air, `#`, `B`, `X`, `P`, `o` coin, `E` enemy, `F` flag pole. Flow: fl
 
 ## Modes
 
-- 1 PLAYER (128x64 view, 32 tiles): 3 lives, 200 s timer. Death freezes 1 s, then respawn. Flag: hero slides down the pole, then `GAME_WON`. 0 lives or timer 0: `GAME_OVER`. HUD: score, coins, `T` seconds left, `L` lives.
+- 1 PLAYER (`.big = BIG_SCALE2`): 2 panels view 128x64 (32 tiles), 4 panels view 64x64 (16 tiles) that main upscales 2x. Same rules in both: 3 lives, 200 s timer. Death freezes 1 s, then respawn. Flag: hero slides down the pole, then `GAME_WON`. 0 lives or timer 0: `GAME_OVER`. HUD: score, coins, `T` seconds left, `L` lives (compact positions in the 64 px view).
   `score() = coins*10 + stomps*10 + furthest column + (on finish) 100 + seconds_left*5`.
-- 1V1 per panel (64x64 view, 16 tiles, `VS_SCORE`, not shared): each instance has the same level, unlimited respawns (a death costs the 1 s freeze plus the walk back from the checkpoint), 120 s limit. Reaching the flag returns `GAME_WON` immediately, that player wins. At the limit `GAME_OVER`, and `score()` = furthest x in px (+10000 if the flag was reached), so `VS_SCORE` picks who got further. HUD: coins, seconds left, `P1`/`P2`.
+- VERSUS per panel (64x64 view, 16 tiles, `VS_SCORE`, not shared, 2-4 players): each instance has the same level, unlimited respawns (a death costs the 1 s freeze plus the walk back from the checkpoint), 120 s limit. Reaching the flag returns `GAME_WON` immediately, that player wins. At the limit `GAME_OVER`, and `score()` = furthest x in px (+10000 if the flag was reached), so `VS_SCORE` picks who got further. HUD: coins, seconds left, `P1`-`P4` in the player color. All drawing uses the view offset x and y (panels can be at y=64) and is clipped to the view. The level is 14 tiles + 8 px HUD = 64 px high, so it fills a 64x64 view exactly. The blue sky is kept.
+
+## Effects
+
+`fx_burst`: coin (gold, 6), stomp (walker brown, 8), death (red, 16), flag fireworks (rainbow, 14, every 8 ticks during the pole slide).
 
 ## Verification (host harness, not in the repo)
 

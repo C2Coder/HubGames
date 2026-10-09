@@ -23,6 +23,9 @@ typedef struct {
 void gfx_clear(void);
 void gfx_pixel(int x, int y, uint16_t c);
 void gfx_rect(int x, int y, int w, int h, uint16_t c);
+void gfx_darken(int x, int y, int w, int h); // quarter brightness, for text over backgrounds
+void gfx_scale2(void);                       // upscale the top-left 64x64 to 128x128
+uint16_t gfx_hsv(uint8_t h, uint8_t s, uint8_t v);
 
 // 3x5 font, each char is 4*scale wide including spacing
 void gfx_text(int x, int y, int scale, uint16_t c, const char *s);

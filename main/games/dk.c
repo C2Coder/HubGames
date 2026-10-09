@@ -31,7 +31,7 @@ enum { ST_PLAY, ST_DEAD, ST_CLEAR };
 
 typedef struct {
     view_t v;
-    int player, ox;
+    int player, ox, oy;
     bool versus;
     int level, lives, state, state_t;
     int points, bonus, tick, time_left, best_h;
@@ -48,6 +48,7 @@ typedef struct {
 _Static_assert(sizeof(dk_t) <= GAME_STATE_MAX, "dk state too big");
 
 static uint32_t shared_seed = 1;
+static int seed_player = -1;
 
 // girder surface at x: floors alternate slope, even floors go down to the left
 static const uint8_t base[FLOORS] = {59, 48, 37, 26, 15};
@@ -99,8 +100,10 @@ static void init(void *p, view_t v, uint8_t players, bool versus)
     s->player = __builtin_ctz(players);
     s->versus = versus;
     s->ox = v.w >= 128 ? v.x + 32 : v.x;
-    if (players & 0x1)
-        shared_seed = esp_random() | 1; // player 0 is inited first, player 1 reuses it
+    s->oy = v.y;
+    if (s->player <= seed_player || seed_player < 0)
+        shared_seed = esp_random() | 1; // lowest player is inited first, the others reuse it
+    seed_player = s->player;
     s->seed = shared_seed;
     s->level = versus ? 2 : 1;
     s->lives = 3;
@@ -192,6 +195,9 @@ static void die(dk_t *s)
     s->state = ST_DEAD;
     s->state_t = 0;
     s->air = false;
+    int x = s->ox + (s->px >> 8), y = s->oy + (s->py >> 8) - 3;
+    fx_burst(x, y, C_RED, 30);
+    fx_burst(x, y, player_color[s->player], 20);
     if (!s->versus)
         s->lives--;
 }
@@ -285,6 +291,14 @@ static void move_player(dk_t *s, const input_t *in)
     }
 }
 
+static void fireworks(const dk_t *s)
+{
+    for (int i = 0; i < 3; i++) {
+        uint32_t r = esp_random();
+        fx_burst(s->ox + 10 + r % 44, s->oy + 4 + (r >> 8) % 24, gfx_hsv(r >> 16, 255, 255), 14);
+    }
+}
+
 static void next_level(dk_t *s)
 {
     s->level++;
@@ -301,6 +315,8 @@ static game_status_t update(void *p, const input_t *in)
         return GAME_OVER;
 
     if (s->state == ST_CLEAR) {
+        if (s->state_t % 12 == 0)
+            fireworks(s);
         if (++s->state_t >= CLEAR_TICKS)
             next_level(s);
         return GAME_RUNNING;
@@ -344,10 +360,12 @@ static game_status_t update(void *p, const input_t *in)
             bx - px >= -3 && bx - px <= 3 && py <= by - 3) {
             b->scored = 1;
             s->points += 100;
+            fx_burst(s->ox + px, s->oy + py - 6, C_YELLOW, 6);
         }
     }
 
     if (s->floor == FLOORS - 1 && !s->air && s->lad < 0 && px >= GOAL_X - 3 && px <= GOAL_X + 3) {
+        fireworks(s);
         if (s->versus)
             return GAME_WON;
         s->points += 500 + s->bonus;
@@ -407,16 +425,16 @@ static const char *const spr_ape[2][8] = {
 
 static void draw_level(const dk_t *s)
 {
-    int ox = s->ox;
+    int ox = s->ox, oy = s->oy;
     uint16_t gc = RGB(200, 50, 40), gd = RGB(130, 30, 30);
     for (int f = 0; f < FLOORS; f++)
         for (int x = span_lo(f); x <= span_hi(f); x++) {
-            int y = surf(f, x);
+            int y = oy + surf(f, x);
             gfx_pixel(ox + x, y, gc);
             gfx_pixel(ox + x, y + 1, x % 4 ? gd : gc);
         }
     for (int l = 0; l < N_LAD; l++) {
-        int x = ladders[l].x, top = surf(ladders[l].gap + 1, x), bot = surf(ladders[l].gap, x);
+        int x = ladders[l].x, top = oy + surf(ladders[l].gap + 1, x), bot = oy + surf(ladders[l].gap, x);
         for (int y = top; y < bot; y++) {
             gfx_pixel(ox + x - 1, y, C_BLUE);
             gfx_pixel(ox + x + 1, y, C_BLUE);
@@ -425,8 +443,8 @@ static void draw_level(const dk_t *s)
         }
     }
     // ape and goal
-    sprite(ox + APE_X + 1, surf(FLOORS - 1, APE_X + 6) - 8, 12, 8, spr_ape[s->ape_t > 0], 0, false);
-    int gy = surf(FLOORS - 1, GOAL_X);
+    sprite(ox + APE_X + 1, oy + surf(FLOORS - 1, APE_X + 6) - 8, 12, 8, spr_ape[s->ape_t > 0], 0, false);
+    int gy = oy + surf(FLOORS - 1, GOAL_X);
     gfx_rect(ox + GOAL_X, gy - 5, 3, 2, C_PINK);
     gfx_rect(ox + GOAL_X + 1, gy - 3, 1, 3, C_PINK);
     gfx_pixel(ox + GOAL_X, gy - 1, C_PINK);
@@ -445,7 +463,7 @@ static void draw(const void *p)
     for (int i = 0; i < MAX_BARREL; i++) {
         const barrel_t *b = &s->b[i];
         if (b->state)
-            sprite(ox + (b->x >> 8) - 2, (b->y >> 8) - 4, 4, 4, spr_barrel[(b->x >> 11) & 1], 0, false);
+            sprite(ox + (b->x >> 8) - 2, s->oy + (b->y >> 8) - 4, 4, 4, spr_barrel[(b->x >> 11) & 1], 0, false);
     }
 
     if (!(s->state == ST_DEAD && (s->state_t / 5) % 2)) {
@@ -456,30 +474,40 @@ static void draw(const void *p)
             f = 3;
         else if (s->anim)
             f = (s->anim / 5) % 3;
-        sprite(ox + (s->px >> 8) - 2, (s->py >> 8) - 6, 5, 6, spr_player[f], pc, s->face < 0);
+        sprite(ox + (s->px >> 8) - 2, s->oy + (s->py >> 8) - 6, 5, 6, spr_player[f], pc, s->face < 0);
     }
 
     char buf[16];
+    int y0 = v->y;
     if (v->w >= 128) {
         int lx = v->x + 1, rx = v->x + 97;
-        gfx_text(lx, 2, 1, C_WHITE, "SCORE");
+        gfx_text(lx, y0 + 2, 1, C_WHITE, "SCORE");
         snprintf(buf, sizeof(buf), "%d", s->points);
-        gfx_text(lx, 9, 1, C_YELLOW, buf);
-        gfx_text(lx, 22, 1, C_WHITE, "BONUS");
+        gfx_text(lx, y0 + 9, 1, C_YELLOW, buf);
+        gfx_text(lx, y0 + 22, 1, C_WHITE, "BONUS");
         snprintf(buf, sizeof(buf), "%d", s->bonus);
-        gfx_text(lx, 29, 1, C_YELLOW, buf);
+        gfx_text(lx, y0 + 29, 1, C_YELLOW, buf);
         snprintf(buf, sizeof(buf), "LVL %d", s->level);
-        gfx_text(rx, 2, 1, C_WHITE, buf);
+        gfx_text(rx, y0 + 2, 1, C_WHITE, buf);
         for (int i = 0; i < s->lives; i++)
-            gfx_rect(rx + i * 5, 12, 3, 5, pc);
-        gfx_rect(ox - 1, 0, 1, 64, C_DARK);
-        gfx_rect(ox + 64, 0, 1, 64, C_DARK);
-    } else {
+            gfx_rect(rx + i * 5, y0 + 12, 3, 5, pc);
+        gfx_rect(ox - 1, y0, 1, 64, C_DARK);
+        gfx_rect(ox + 64, y0, 1, 64, C_DARK);
+    } else if (s->versus) {
         snprintf(buf, sizeof(buf), "%d", s->best_h * 10 + s->points);
-        gfx_text(v->x + 1, v->y, 1, C_WHITE, buf);
+        gfx_text(v->x + 1, y0, 1, C_WHITE, buf);
         snprintf(buf, sizeof(buf), "%d", (s->time_left + 49) / 50);
-        gfx_text(v->x + 30, v->y, 1, C_YELLOW, buf);
-        gfx_text(v->x + v->w - 8, v->y, 1, pc, s->player ? "P2" : "P1");
+        gfx_text(v->x + 30, y0, 1, C_YELLOW, buf);
+        snprintf(buf, sizeof(buf), "P%d", s->player + 1);
+        gfx_text(v->x + v->w - 8, y0, 1, pc, buf);
+    } else {
+        // single in 64x64: score, level, lives in the top line
+        snprintf(buf, sizeof(buf), "%d", s->points);
+        gfx_text(v->x + 1, y0, 1, C_YELLOW, buf);
+        snprintf(buf, sizeof(buf), "L%d", s->level);
+        gfx_text(v->x + 34, y0, 1, C_WHITE, buf);
+        for (int i = 0; i < s->lives; i++)
+            gfx_rect(v->x + 50 + i * 5, y0 + 1, 3, 4, pc);
     }
 }
 
@@ -491,6 +519,7 @@ static int score(const void *p)
 
 const game_t game_dk = {
     .vs_rule = VS_SCORE,
+    .big = BIG_SCALE2,
     .init = init,
     .update = update,
     .draw = draw,

@@ -8,8 +8,8 @@
 #define CELL        2
 #define HUD         6
 #define COLS        (HUB75_W / CELL)
-#define ROWS        ((HUB75_H - HUD) / CELL)
-#define MAX_CELLS   (COLS * ROWS)
+#define MAX_ROWS    ((HUB75_H - HUD) / CELL)
+#define MAX_CELLS   (COLS * MAX_ROWS)
 #define MAX_LEN     1024
 #define FOOD_N      3
 #define DEATH_TICKS 60
@@ -26,6 +26,7 @@ typedef struct {
 
 typedef struct {
     uint8_t players;
+    int rows;
     worm_t w[MAX_PLAYERS];
     uint8_t occ[MAX_CELLS];
     uint16_t food[FOOD_N];
@@ -35,12 +36,12 @@ typedef struct {
 
 _Static_assert(sizeof(arena_t) <= GAME_STATE_MAX, "arena state too big");
 
-// start row, start column, direction
+// start row (in quarters of the board), start column, direction
 static const int8_t starts[MAX_PLAYERS][3] = {
-    {ROWS / 4, COLS / 6, 1},
-    {ROWS * 3 / 4, COLS - 1 - COLS / 6, -1},
-    {ROWS * 3 / 4, COLS / 6, 1},
-    {ROWS / 4, COLS - 1 - COLS / 6, -1},
+    {1, COLS / 6, 1},
+    {3, COLS - 1 - COLS / 6, -1},
+    {3, COLS / 6, 1},
+    {1, COLS - 1 - COLS / 6, -1},
 };
 
 static bool playing(const arena_t *s, int p)
@@ -55,8 +56,9 @@ static int cell_at(const worm_t *w, int i)
 
 static void place_food(arena_t *s, int f)
 {
-    int i = esp_random() % MAX_CELLS;
-    for (int n = 0; n < MAX_CELLS; n++, i = (i + 1) % MAX_CELLS) {
+    int cells = COLS * s->rows;
+    int i = esp_random() % cells;
+    for (int n = 0; n < cells; n++, i = (i + 1) % cells) {
         bool taken = s->occ[i];
         for (int k = 0; k < FOOD_N; k++)
             taken |= k != f && s->food[k] == i;
@@ -71,6 +73,7 @@ static void init(void *p, view_t v, uint8_t players, bool versus)
     arena_t *s = p;
     memset(s, 0, sizeof(*s));
     s->players = players;
+    s->rows = (v.h - HUD) / CELL;
     for (int pl = 0; pl < MAX_PLAYERS; pl++) {
         worm_t *w = &s->w[pl];
         if (!playing(s, pl)) {
@@ -82,7 +85,7 @@ static void init(void *p, view_t v, uint8_t players, bool versus)
         w->dx = starts[pl][2];
         for (int i = 0; i < w->len; i++) {
             // body[0] is the tail, body[len - 1] the head
-            w->body[i] = starts[pl][0] * COLS + starts[pl][1] + (i - w->len + 1) * w->dx;
+            w->body[i] = s->rows * starts[pl][0] / 4 * COLS + starts[pl][1] + (i - w->len + 1) * w->dx;
             s->occ[w->body[i]] = 1;
         }
     }
@@ -150,7 +153,7 @@ static game_status_t update(void *p, const input_t *in)
         }
         int h = cell_at(w, 0);
         int x = h % COLS + w->dx, y = h / COLS + w->dy;
-        if (x < 0 || y < 0 || x >= COLS || y >= ROWS) {
+        if (x < 0 || y < 0 || x >= COLS || y >= s->rows) {
             died[pl] = true;
             continue;
         }
@@ -177,11 +180,11 @@ static game_status_t update(void *p, const input_t *in)
                 died[pl] = true;
     }
 
-    int n_died = 0;
     for (int pl = 0; pl < MAX_PLAYERS; pl++)
         if (died[pl]) {
+            int h = cell_at(&s->w[pl], 0);
+            fx_burst(h % COLS * CELL + 1, HUD + h / COLS * CELL + 1, player_color[pl], 30);
             s->w[pl].dead = true;
-            n_died++;
         }
 
     if (alive_count(s) <= 1) {
@@ -206,6 +209,7 @@ static game_status_t update(void *p, const input_t *in)
         if (w->dead)
             continue;
         if (eat[pl] >= 0) {
+            fx_burst(nh[pl] % COLS * CELL + 1, HUD + nh[pl] / COLS * CELL + 1, C_RED, 10);
             if (w->len < MAX_LEN)
                 w->len++;
             w->score++;
@@ -268,6 +272,7 @@ static uint8_t winners(const void *p)
 
 const game_t game_snake_arena = {
     .shared = true,
+    .big = BIG_NATIVE,
     .init = init,
     .update = update,
     .draw = draw,

@@ -72,6 +72,13 @@ static void queue_turn(snake_t *s, int dx, int dy)
     s->qn++;
 }
 
+static void die(snake_t *s)
+{
+    s->dead = true;
+    int h = s->head;
+    fx_burst(s->v.x + s->x[h] * CELL + 1, s->v.y + HUD + s->y[h] * CELL + 1, player_color[s->player], 30);
+}
+
 static game_status_t update(void *p, const input_t *in)
 {
     snake_t *s = p;
@@ -98,7 +105,7 @@ static game_status_t update(void *p, const input_t *in)
 
     int hx = s->x[s->head] + s->dx, hy = s->y[s->head] + s->dy;
     if (hx < 0 || hy < 0 || hx >= s->cols || hy >= s->rows) {
-        s->dead = true;
+        die(s);
         return GAME_RUNNING;
     }
 
@@ -108,7 +115,7 @@ static game_status_t update(void *p, const input_t *in)
         s->occ[s->y[t] * s->cols + s->x[t]] = 0;
     }
     if (s->occ[hy * s->cols + hx]) {
-        s->dead = true;
+        die(s);
         return GAME_RUNNING;
     }
 
@@ -118,6 +125,7 @@ static game_status_t update(void *p, const input_t *in)
     s->occ[hy * s->cols + hx] = 1;
 
     if (eat) {
+        fx_burst(s->v.x + hx * CELL + 1, s->v.y + HUD + hy * CELL + 1, C_RED, 10);
         s->len++;
         s->score++;
         s->interval = 10 - s->score / 8;
@@ -139,7 +147,10 @@ static void draw(const void *p)
     snprintf(buf, sizeof(buf), "%d", s->score);
     gfx_text(v->x + 1, v->y, 1, C_WHITE, buf);
     if (s->versus)
-        gfx_text(v->x + v->w - 8, v->y, 1, c, s->player ? "P2" : "P1");
+    {
+        char tag[3] = {'P', '1' + s->player, 0};
+        gfx_text(v->x + v->w - 8, v->y, 1, c, tag);
+    }
     gfx_rect(v->x, v->y + HUD - 1, v->w, 1, C_DARK);
 
     int ox = v->x, oy = v->y + HUD;
@@ -160,6 +171,7 @@ static int score(const void *p)
 
 const game_t game_snake = {
     .vs_rule = VS_FIRST_DEATH,
+    .big = BIG_NATIVE,
     .init = init,
     .update = update,
     .draw = draw,

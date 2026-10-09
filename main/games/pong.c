@@ -7,6 +7,8 @@
 
 #define PAD_W     2
 #define PAD_H     12
+#define PAD_H_BIG 18 // tall court (128 high)
+#define TRAIL     5
 #define WIN_PTS   5
 #define SERVE_T   50
 #define END_T     60
@@ -34,6 +36,8 @@ typedef struct {
     uint8_t players;
     pad_t pad[4];
     int npad;
+    int pad_h;
+    int16_t tx[TRAIL], ty[TRAIL]; // ball trail, px
     int pts[2];
     int32_t bx, by, vx, vy; // ball top-left, 8.8
     int speed;
@@ -68,7 +72,7 @@ static void add_pad(pong_t *s, int side, int player, int slot)
     p->side = side;
     p->player = player;
     p->x = side ? s->v.w - 4 - slot * 12 : 2 + slot * 12;
-    p->y = FX((s->v.h - PAD_H) / 2);
+    p->y = FX((s->v.h - s->pad_h) / 2);
     p->color = player_color[player >= 0 ? player : side];
 }
 
@@ -80,6 +84,9 @@ static void init(void *st, view_t v, uint8_t players, bool versus)
     s->versus = versus;
     s->players = players;
     s->winner = -1;
+    s->pad_h = v.h > 64 ? PAD_H_BIG : PAD_H;
+    for (int i = 0; i < TRAIL; i++)
+        s->tx[i] = s->ty[i] = -10;
     for (int side = 0; side < 2; side++) {
         int slot = 0;
         for (int p = side; p < MAX_PLAYERS; p += 2)
@@ -110,11 +117,11 @@ static bool paddle_hit(pong_t *s, pad_t *p, int32_t ox)
     } else {
         return false;
     }
-    if (!(ycross + FX(2) > p->y - FX(1) && ycross < p->y + FX(PAD_H + 1)))
+    if (!(ycross + FX(2) > p->y - FX(1) && ycross < p->y + FX(s->pad_h + 1)))
         return false;
     s->bx = nbx;
     s->by = ycross;
-    int off = (ycross + FX(1) - (p->y + FX(PAD_H / 2))) * 256 / FX(7);
+    int off = (ycross + FX(1) - (p->y + FX(s->pad_h / 2))) * 256 / FX(s->pad_h / 2 + 1);
     off = clampi(off, -256, 256);
     int aoff = off < 0 ? -off : off;
     s->speed = clampi(s->speed + SPEED_HIT, 0, SPEED_MAX);
@@ -131,9 +138,9 @@ static void ai_move(pong_t *s, pad_t *p)
     if (--p->ai_t <= 0) {
         p->ai_t = 6;
         if (toward && near)
-            p->ai_target = s->by + FX(1) + FX(p->ai_err) - FX(PAD_H / 2);
+            p->ai_target = s->by + FX(1) + FX(p->ai_err) - FX(s->pad_h / 2);
         else
-            p->ai_target = FX((s->v.h - PAD_H) / 2);
+            p->ai_target = FX((s->v.h - s->pad_h) / 2);
     }
     int32_t d = p->ai_target - p->y;
     if (d > FX(2))
@@ -169,7 +176,7 @@ static game_status_t update(void *st, const input_t *in)
                 sp = PAD_SPEED;
             p->y += sp;
         }
-        p->y = clampi(p->y, 0, FX(s->v.h - PAD_H));
+        p->y = clampi(p->y, 0, FX(s->v.h - s->pad_h));
     }
 
     // serve pause
@@ -188,13 +195,23 @@ static game_status_t update(void *st, const input_t *in)
     if (s->by < 0) {
         s->by = -s->by;
         s->vy = -s->vy;
+        fx_burst(s->v.x + (s->bx >> 8) + 1, s->v.y, C_WHITE, 3);
     } else if (s->by > FX(s->v.h - 2)) {
         s->by = FX(2 * (s->v.h - 2)) - s->by;
         s->vy = -s->vy;
+        fx_burst(s->v.x + (s->bx >> 8) + 1, s->v.y + s->v.h, C_WHITE, 3);
     }
     for (int i = 0; i < s->npad; i++)
-        if (paddle_hit(s, &s->pad[i], ox))
+        if (paddle_hit(s, &s->pad[i], ox)) {
+            fx_burst(s->v.x + (s->bx >> 8) + 1, s->v.y + (s->by >> 8) + 1, s->pad[i].color, 8);
             break;
+        }
+    for (int i = TRAIL - 1; i > 0; i--) {
+        s->tx[i] = s->tx[i - 1];
+        s->ty[i] = s->ty[i - 1];
+    }
+    s->tx[0] = ox >> 8;
+    s->ty[0] = (s->by - s->vy) >> 8;
 
     // points
     int scorer = -1;
@@ -203,6 +220,10 @@ static game_status_t update(void *st, const input_t *in)
     else if (s->bx > FX(s->v.w))
         scorer = 0;
     if (scorer >= 0) {
+        fx_burst(s->v.x + (scorer ? 0 : s->v.w), s->v.y + clampi(s->by >> 8, 0, s->v.h - 1),
+                 player_color[scorer], 30);
+        for (int i = 0; i < TRAIL; i++)
+            s->tx[i] = s->ty[i] = -10;
         if (++s->pts[scorer] >= WIN_PTS) {
             s->winner = scorer;
             s->end_t = 0;
@@ -233,8 +254,16 @@ static void draw(const void *st)
         const pad_t *p = &s->pad[i];
         if (s->winner >= 0 && p->side != s->winner && blink)
             continue;
-        gfx_rect(v->x + p->x, v->y + (p->y >> 8), PAD_W, PAD_H, p->color);
+        gfx_rect(v->x + p->x, v->y + (p->y >> 8), PAD_W, s->pad_h, p->color);
     }
+    if (s->serve_t <= 0 && s->winner < 0)
+        for (int i = TRAIL - 1; i >= 0; i--)
+            if (s->tx[i] > -10) {
+                uint16_t c = C_WHITE;
+                for (int k = 0; k < i / 2 + 2; k++)
+                    c = (c >> 1) & 0x7BEF;
+                gfx_rect(v->x + s->tx[i], v->y + s->ty[i], 2, 2, c);
+            }
     if (!blink || s->winner >= 0)
         gfx_rect(v->x + (s->bx >> 8), v->y + (s->by >> 8), 2, 2, C_WHITE);
 }
@@ -260,6 +289,7 @@ static uint8_t winners(const void *st)
 const game_t game_pong = {
     .vs_rule = VS_SCORE,
     .shared = true,
+    .big = BIG_NATIVE,
     .init = init,
     .update = update,
     .draw = draw,

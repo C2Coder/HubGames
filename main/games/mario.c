@@ -172,6 +172,7 @@ static void die(mario_t *s)
     s->st = ST_DEAD;
     s->dead_t = 0;
     s->vy = -450;
+    fx_burst(s->v.x + (s->x >> 8) - s->cam + 1, s->v.y + HUD + (s->y >> 8) + 3, C_RED, 16);
     if (!s->versus)
         s->lives--;
 }
@@ -270,6 +271,7 @@ static void enemies(mario_t *s)
             if (s->vy > 0 && hy + HERO_H - ey <= 3) {
                 e->st = 2;
                 e->t = 0;
+                fx_burst(s->v.x + ex - s->cam + 2, s->v.y + HUD + ey + 2, RGB(200, 130, 60), 8);
                 if (!(s->stomped & (1u << i))) {
                     s->stomped |= 1u << i;
                     s->stomps++;
@@ -280,6 +282,16 @@ static void enemies(mario_t *s)
             }
         }
     }
+}
+
+// burst around the flag top
+static void fireworks(mario_t *s)
+{
+    static const int8_t dx[4] = {-8, 6, -3, 9}, dy[4] = {2, 0, -3, 5};
+    int i = s->win_t / 8 & 3;
+    int x = s->v.x + (s->x >> 8) - s->cam + dx[i];
+    int y = s->v.y + HUD + 6 + dy[i];
+    fx_burst(x, y, gfx_hsv(s->frame * 23, 255, 255), 14);
 }
 
 static void pickups(mario_t *s)
@@ -293,11 +305,13 @@ static void pickups(mario_t *s)
             if (level[r][c] == 'o' && !(s->coin_taken[idx >> 3] & (1 << (idx & 7)))) {
                 s->coin_taken[idx >> 3] |= 1 << (idx & 7);
                 s->coins++;
+                fx_burst(s->v.x + c * T - s->cam + 2, s->v.y + HUD + r * T + 2, C_YELLOW, 6);
             } else if (level[r][c] == 'F' && s->st == ST_PLAY) {
                 s->st = ST_WIN;
                 s->won = true;
                 s->win_t = 0;
                 s->vx = s->vy = 0;
+                fireworks(s);
             }
         }
 }
@@ -309,6 +323,8 @@ static game_status_t update(void *p, const input_t *in)
 
     if (s->st == ST_WIN) { // slide down the pole
         move_y(&s->y, 128, s->x >> 8, HERO_W, HERO_H);
+        if (s->win_t % 8 == 7)
+            fireworks(s);
         if (s->versus || ++s->win_t >= SLIDE_TICKS)
             return GAME_WON;
         return GAME_RUNNING;
@@ -502,15 +518,19 @@ static void draw(const void *p)
         gfx_text(v->x + 4, v->y + 1, 1, C_WHITE, buf);
         snprintf(buf, sizeof(buf), "%d", secs);
         gfx_text(v->x + 28, v->y + 1, 1, tc, buf);
-        gfx_text(v->x + v->w - 9, v->y + 1, 1, pc, s->player ? "P2" : "P1");
+        snprintf(buf, sizeof(buf), "P%d", s->player + 1);
+        gfx_text(v->x + v->w - 9, v->y + 1, 1, player_color[s->player], buf);
     } else {
+        // wide view: spread out, 64 px view: compact
+        bool wide = v->w >= 128;
+        int cx = wide ? 44 : 22, tx = wide ? 70 : 35;
         snprintf(buf, sizeof(buf), "%d", s->coins * 10 + s->stomps * 10 + s->furthest / T);
         gfx_text(v->x + 1, v->y + 1, 1, C_WHITE, buf);
-        rect(v, 44, 2, 2, 3, C_YELLOW);
+        rect(v, cx, 2, 2, 3, C_YELLOW);
         snprintf(buf, sizeof(buf), "%d", s->coins);
-        gfx_text(v->x + 47, v->y + 1, 1, C_YELLOW, buf);
+        gfx_text(v->x + cx + 3, v->y + 1, 1, C_YELLOW, buf);
         snprintf(buf, sizeof(buf), "T%d", secs);
-        gfx_text(v->x + 70, v->y + 1, 1, tc, buf);
+        gfx_text(v->x + tx, v->y + 1, 1, tc, buf);
         snprintf(buf, sizeof(buf), "L%d", s->lives);
         gfx_text(v->x + v->w - 9, v->y + 1, 1, C_RED, buf);
     }
@@ -530,6 +550,7 @@ static int score(const void *p)
 const game_t game_mario = {
     .vs_rule = VS_SCORE,
     .shared = false,
+    .big = BIG_SCALE2,
     .init = init,
     .update = update,
     .draw = draw,

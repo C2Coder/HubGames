@@ -72,3 +72,10 @@ State struct (`tetris_t`), all in the 8192 byte `GAME_STATE_MAX`:
 Total about 300 B, a few percent of the limit; `_Static_assert(sizeof(tetris_t) <= GAME_STATE_MAX)` like snake.
 
 Tick timing: `update` runs every 20 ms. Order per tick: input (rotate/hard drop on `pressed`, move on `held` with DAS counter) -> gravity counter -> lock delay -> clear/spawn. `draw` is read-only, uses `gfx_rect` per locked cell (up to 200 rects, fine). Preview and HUD positions are computed once in `init` from `v.w` (`v.w == 128` selects the wide layout).
+
+## v2
+
+- `.big = BIG_SCALE2`: 1 PLAYER on 4 panels gets a 64x64 view (versus = false, no P tag), upscaled 2x by main.
+- VERSUS 2-4 players: all drawing uses `v.x`/`v.y`, tag is `P<player+1>` in `player_color[player]`. Seed is redrawn when an instance is inited with a player number <= the previous one (start of a new game), so it works for any player set.
+- Text columns sit on black panels, the well is black, so the ambient background shows only in the gaps.
+- Effects: `fx_burst` sparkles along each cleared row (row colours), small burst under the piece on hard drop, explosion over the board on game over.

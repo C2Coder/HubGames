@@ -10,6 +10,14 @@ One 64x64 level with 5 slanted girders and 6 ladders. An ape on the top girder (
 - Girder surfaces: `base[] = {59, 48, 37, 26, 15}` plus 0..3 px slope. Even floors (0, 2, 4) slope down to the left, odd floors down to the right. Spans: even floors x 3..63 (floor 0 x 0..63), odd floors x 0..60. The 3 px gap at the downhill end is where barrels fall through.
 - Ladders `{gap, x}`: `{0,44} {1,14} {1,50} {2,44} {2,20} {3,16}`.
 
+## v2
+
+- `.big = BIG_SCALE2`: 1 PLAYER on 4 panels runs in a 64x64 view (upscaled 2x by main). Single HUD there is one top line: score, `L<n>`, lives as player-colour blocks (ape and level start below it).
+- All drawing uses `v.x` and `v.y` (`s->oy`), so versus views at y=64 work. HUD tag is `P<player+1>`, colours from `player_color[player]`.
+- Seed: a new seed is drawn when `init` gets a player not above the previous one (lowest player is inited first), the others reuse it.
+- Effects: gold burst on a jumped barrel, red + player colour bursts on death, random coloured fireworks on reaching the top (and every 12 ticks during the level clear pause).
+- Background is not cleared.
+
 ## Controls
 
 - LEFT / RIGHT: walk (0.6 px/tick), follows the girder slope.
@@ -22,7 +30,7 @@ One 64x64 level with 5 slanted girders and 6 ladders. An ape on the top girder (
 - Touching a barrel kills. Jumping over a rolling barrel on the same floor: +100.
 - Single: 3 lives, 3 levels. Reaching the goal gives +500 + BONUS (starts 1000, -10 every 20 ticks). Level 3 cleared returns `GAME_WON`, no lives returns `GAME_OVER`. `score()` = points. On death barrels are cleared and the player restarts at the bottom, bonus keeps running.
 - 1v1 (per panel, `VS_SCORE`, level 2 speed): reaching the goal returns `GAME_WON` at once. Dying respawns at the bottom after 50 ticks, no lives. 90 s limit shown on the HUD, then `GAME_OVER`. `score()` = `best_height * 10 + points` (best height = highest girder point reached, never lowered by dying), so VS_SCORE picks who got higher.
-- Both panels get the same barrels: `player 0` draws a file-static seed in `init`, player 1 reuses it. Barrel spawns are tick-timed and the ladder choice is `hash(seed, barrel serial, ladder)`, no RNG state, so sequences stay identical.
+- All panels get the same barrels: the lowest player draws a file-static seed in `init`, the others reuse it. Barrel spawns are tick-timed and the ladder choice is `hash(seed, barrel serial, ladder)`, no RNG state, so sequences stay identical.
 
 ## Verification
 

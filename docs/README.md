@@ -26,15 +26,17 @@ Flashing goes over native USB (USB-Serial-JTAG), no boot button needed.
 
 ## Playing
 
-Connect a phone to the open WiFi `HubGames` and open `http://192.168.4.1`. First phone is P1, second P2.
-P1 picks the mode (1 player on both panels, 1v1 on one panel each) and the game.
+Connect a phone to the open WiFi `HubGames` and open `http://192.168.4.1`. Phones get P1-P4 in connect order.
+P1 picks in the main menu: 1 PLAYER, VERSUS (own panel each), PARTY (2-4 on one shared screen), AMBIENT (attract show) or SETTINGS (2 or 4 panels, brightness, panel test).
+With nobody connected the panels run the ambient show with join info. 4 panels = 2x2, chain order in `panel_map` in `main/hub75.c`.
 
 ## Code
 
 - `main/main.c` - game loop (20 ms), menus, pause, results
 - `main/net.c` - WiFi AP, HTTP page, WebSocket input, player slots
 - `main/gfx.c` - drawing + 3x5 font into `hub75_fb[y][x]` (RGB565), sent by `hub75_show()`
+- `main/fx.c` - particles, `main/ambient.c` - plasma and attract show, `main/settings.c` - NVS settings
 - `main/games/` - games implementing `game_t` from `game.h`
 - `main/web/index.html` - controller page
 
-Design: `docs/plan.md`, per game `docs/games/`.
+Design: `docs/plan.md`, `docs/plan-v2.md`, per game `docs/games/`.
