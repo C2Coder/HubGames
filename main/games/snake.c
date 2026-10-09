@@ -57,7 +57,7 @@ static void init(void *p, view_t v, int player, bool versus)
         s->occ[s->y[i] * s->cols + s->x[i]] = 1;
     }
     s->dx = 1;
-    s->interval = 7;
+    s->interval = 10;
     place_food(s);
 }
 
@@ -120,7 +120,7 @@ static game_status_t update(void *p, const input_t *in)
     if (eat) {
         s->len++;
         s->score++;
-        s->interval = 7 - s->score / 5;
+        s->interval = 10 - s->score / 8;
         if (s->interval < 3)
             s->interval = 3;
         if (!place_food(s))

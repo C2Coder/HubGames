@@ -64,7 +64,7 @@ static void init(void *p, view_t v, int player, bool versus)
             s->occ[w->body[i]] = 1;
         }
     }
-    s->interval = 7;
+    s->interval = 10;
     for (int f = 0; f < FOOD_N; f++)
         s->food[f] = 0xffff;
     for (int f = 0; f < FOOD_N; f++)
@@ -155,7 +155,7 @@ static game_status_t update(void *p, const input_t *in)
         if (eat[pl] >= 0)
             place_food(s, eat[pl]);
 
-    s->interval = 7 - (s->w[0].score + s->w[1].score) / 6;
+    s->interval = 10 - (s->w[0].score + s->w[1].score) / 12;
     if (s->interval < 3)
         s->interval = 3;
     return GAME_RUNNING;
