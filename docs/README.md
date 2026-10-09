@@ -137,5 +137,5 @@ idf.py -B build-doom -D SDKCONFIG=sdkconfig.doom monitor
 
 Cestu sériového portu upravte podle zařízení. Plný DOOM převzal upstream GPL-2.0
 engine; telefon automaticky zobrazí joystick pro pohyb a úkroky, samostatné
-šipky pro otáčení a FIRE/USE. START otevírá menu DOOMu. Ukončení DOOMu rebootuje
+větší šipky pro otáčení, FIRE nad nimi a USE pod nimi. START otevírá menu DOOMu. Ukončení DOOMu rebootuje
 zařízení, stejně jako původní upstream. Mikro FPS zůstává samostatná malá hra.
