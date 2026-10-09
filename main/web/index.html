@@ -25,6 +25,10 @@ html, body { height: 100%; background: #111; color: #eee; font-family: sans-seri
 .r { position: absolute; width: 23vh; height: 23vh; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9vh; font-weight: bold; color: #fff; }
 #a { right: 0; top: 2vh; background: #b22; }
 #b { left: 0; bottom: 2vh; background: #c80; }
+#doompad { display: grid; grid-template-columns: 19vh 26vh 19vh; grid-template-rows: 26vh 14vh; gap: 2vh; align-items: center; }
+#fire { height: 26vh; border-radius: 50%; background: #b22; color: #fff; font-size: 6vh; font-weight: bold; }
+#use { grid-column: 2; height: 12vh; background: #c80; color: #fff; font-size: 5vh; }
+.turn { height: 19vh; }
 #rot { display: none; height: 100%; align-items: center; justify-content: center; font-size: 6vw; color: #888; }
 @media (orientation: portrait) { #rot { display: flex; } #bar, #pad { display: none; } }
 </style>
@@ -41,7 +45,12 @@ html, body { height: 100%; background: #111; color: #eee; font-family: sans-seri
       <div></div><div class="k" data-b="down">&#9660;</div><div></div>
     </div>
   </div>
-  <div id="right"><div id="ab"><div id="a" class="r" data-b="a">A<span class="caption" id="acap"></span></div><div id="b" class="r" data-b="b">B<span class="caption" id="bcap"></span></div></div></div>
+  <div id="right"><div id="ab"><div id="a" class="r" data-b="a">A<span class="caption" id="acap"></span></div><div id="b" class="r" data-b="b">B<span class="caption" id="bcap"></span></div></div>
+    <div id="doompad" class="hide">
+      <div class="k turn" data-b="left">&#9664;</div><div id="fire" class="k" data-b="a">FIRE</div><div class="k turn" data-b="right">&#9654;</div>
+      <div id="use" class="k" data-b="b">USE</div>
+    </div>
+  </div>
 </div>
 <script>
 const BITS = { up: 1, down: 2, left: 4, right: 8, a: 16, b: 32, start: 64 };
@@ -56,7 +65,7 @@ function send(urgent = true) {
   }
   if (pendingSend !== null) { clearTimeout(pendingSend); pendingSend = null; }
   if (ws && ws.readyState === 1 && ws.bufferedAmount < 256) {
-    ws.send(new Int8Array([btn, jx, jy]));
+    ws.send(new Int8Array([btn | (currentProfile === 10 && !arrows ? 128 : 0), jx, jy]));
     lastSend = performance.now();
   }
 }
@@ -66,11 +75,14 @@ const profiles = [
   ['', '', ''], ['BOMB', '', 'MOVE'], ['BOOST', '', 'TURN'],
   ['ITEM', 'DRIFT', 'LEFT / RIGHT: STEER'], ['KICK', 'SPRINT', 'MOVE'],
   ['ROTATE', 'DROP', 'LEFT / RIGHT: MOVE'], ['FIRE', 'STRAFE', 'STICK: MOVE + TURN'],
-  ['RESUME', 'QUIT', 'PAUSED'], ['AGAIN', 'MENU', 'ROUND OVER'], ['NEXT', 'MENU', 'PARTY CUP']
+  ['RESUME', 'QUIT', 'PAUSED'], ['AGAIN', 'MENU', 'ROUND OVER'], ['NEXT', 'MENU', 'PARTY CUP'],
+  ['FIRE', 'USE', 'STICK: MOVE + STRAFE'], ['FIRE', '', 'MOVE']
 ];
 function show(p, profile = 0, color) {
   if (profile !== currentProfile) {
+    releaseControls();
     currentProfile = profile;
+    syncLayout();
     const labels = profiles[profile] || profiles[0];
     document.getElementById('acap').textContent = labels[0];
     document.getElementById('bcap').textContent = labels[1];
@@ -144,10 +156,16 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) relea
 const swap = document.getElementById('swap'), dpad = document.getElementById('dpad');
 function setArrows(on) {
   releaseControls();
-  joy.classList.toggle('hide', on);
-  dpad.classList.toggle('hide', !on);
-  swap.textContent = on ? 'STICK' : 'ARROWS';
+  syncLayout();
   try { localStorage.setItem('arrows', on ? '1' : ''); } catch (e) {}
+}
+function syncLayout() {
+  const doom = currentProfile === 10;
+  joy.classList.toggle('hide', arrows);
+  dpad.classList.toggle('hide', !arrows);
+  document.getElementById('ab').classList.toggle('hide', doom);
+  document.getElementById('doompad').classList.toggle('hide', !doom);
+  swap.textContent = arrows ? 'STICK' : 'ARROWS';
 }
 let arrows = false;
 try { arrows = !!localStorage.getItem('arrows'); } catch (e) {}

@@ -1,0 +1,5 @@
+# Doom's big static arrays go to PSRAM
+[mapping:doomgeneric]
+archive: libdoomgeneric.a
+entries:
+    * (extram_bss)

@@ -20,3 +20,5 @@ the southeast open area to win. Health is restored slightly by a kill.
 
 1 PLAYER uses the full 128×64 screen. VERSUS runs independent 64×64 runs on the two
 panels, comparing kills and remaining health, or finishing instantly on a win.
+
+Po přepnutí upstreamu na `C2Coder/HubGames` je zachován také jeho plný doomgeneric port jako volitelné sestavení s PSRAM/WAD. MICRO FPS zůstává výchozí nezávislá varianta.

@@ -25,6 +25,11 @@ idf.py build flash monitor
 
 Flashing goes over native USB (USB-Serial-JTAG), no boot button needed.
 
+## Doom
+
+Full DOOM from upstream is preserved as an optional PSRAM/WAD build; see the full DOOM instructions below. Its phone layout switches automatically.
+
+
 ## Playing
 
 Connect a phone to the open WiFi `HubGames` and open `http://192.168.4.1`. Up to 12 phones get P1-P12 in connect order.
@@ -110,3 +115,27 @@ actual board and twelve phones.
 - `main/web/index.html` - controller page
 
 Design: `docs/plan.md`, `docs/plan-v2.md`, per game `docs/games/`.
+
+### Upstream Tanky a plný DOOM
+
+Větev zachovává novější Tanky i port doomgeneric z `C2Coder/HubGames`.
+Tanky podporují 2–8 hráčů v aréně (tři vítězná kola) nebo singleplayer proti AI;
+A střílí. Masky, barvy a rozložení skóre fungují i pro připojené sloty P9–P12.
+
+Výchozí firmware obsahuje MICRO FPS a nevyžaduje PSRAM ani WAD. Plný DOOM
+je volitelný pro ESP32-S3 s octal PSRAM; jeho zdrojový port a WAD partition
+zůstávají v repozitáři. Nové sestavení s PSRAM:
+
+```sh
+git submodule update --init --recursive
+idf.py -B build-doom -D SDKCONFIG=sdkconfig.doom -D 'SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.doom' build
+idf.py -B build-doom -D SDKCONFIG=sdkconfig.doom flash
+./doom/get-wad.sh
+./doom/flash-wad.sh /dev/ttyACM0
+idf.py -B build-doom -D SDKCONFIG=sdkconfig.doom monitor
+```
+
+Cestu sériového portu upravte podle zařízení. Plný DOOM převzal upstream GPL-2.0
+engine; telefon automaticky zobrazí joystick pro pohyb a úkroky, samostatné
+šipky pro otáčení a FIRE/USE. START otevírá menu DOOMu. Ukončení DOOMu rebootuje
+zařízení, stejně jako původní upstream. Mikro FPS zůstává samostatná malá hra.

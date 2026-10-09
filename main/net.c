@@ -61,8 +61,10 @@ void input_get(int p, input_t *in)
     bool conn = s->fd >= 0;
     uint8_t b = conn ? s->btn : 0;
     int jx = conn ? s->jx : 0, jy = conn ? s->jy : 0;
-    // joystick gives only the dominant direction
-    if (abs(jx) > abs(jy)) {
+    bool strafe = b & BTN_STRAFE_MODE;
+    b &= ~BTN_STRAFE_MODE;
+    // In full Doom the stick moves/strafes; separate arrows turn.
+    if (!strafe && abs(jx) > abs(jy)) {
         if (jx > DEADZONE) b |= BTN_RIGHT;
         if (jx < -DEADZONE) b |= BTN_LEFT;
     } else {
@@ -74,6 +76,7 @@ void input_get(int p, input_t *in)
     in->pressed = b & ~s->prev;
     in->jx = jx;
     in->jy = jy;
+    in->strafe = strafe;
     in->connected = conn;
     s->prev = b;
     portEXIT_CRITICAL(&lock);

@@ -64,3 +64,5 @@ extern const game_t game_football;
 extern const game_t game_towers;
 
 extern const game_t game_fps;
+
+extern const game_t game_tanks;

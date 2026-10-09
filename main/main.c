@@ -17,6 +17,9 @@
 #include "net.h"
 #include "settings.h"
 #include "school.h"
+#ifdef CONFIG_HUBGAMES_FULL_DOOM
+#include "doom.h"
+#endif
 
 #define FRAME_MS        20
 #define COUNTDOWN_TICKS (3000 / FRAME_MS)
@@ -46,6 +49,10 @@ static const struct {
     {"PONG", &game_pong, M_SINGLE | M_VS | M_PARTY},
     {"DONKEY KONG", &game_dk, M_SINGLE | M_VS},
     {"MARIO", &game_mario, M_SINGLE | M_VS},
+    {"TANKS", &game_tanks, M_SINGLE | M_VS | M_PARTY},
+#ifdef CONFIG_HUBGAMES_FULL_DOOM
+    {"DOOM", NULL, M_SINGLE},
+#endif
     {"BOMBER ARENA", &game_bomber, M_VS | M_PARTY},
     {"TRON", &game_tron, M_VS | M_PARTY},
     {"POCKET RACERS", &game_racers, M_VS | M_PARTY},
@@ -58,7 +65,7 @@ static const struct {
 
 enum { SET_PANELS, SET_BRIGHT, SET_TEST, SET_N };
 
-enum { S_MAIN, S_GAMES, S_COUNTDOWN, S_PLAY, S_PAUSE, S_RESULT, S_AMBIENT, S_SCHOOL, S_SETTINGS, S_PANELTEST };
+enum { S_MAIN, S_GAMES, S_COUNTDOWN, S_PLAY, S_PAUSE, S_RESULT, S_AMBIENT, S_SCHOOL, S_SETTINGS, S_PANELTEST, S_DOOM };
 
 static uint32_t t; // frame counter
 static int state = S_MAIN, fade, timer;
@@ -90,7 +97,8 @@ static controller_profile_t game_controller(void)
 {
     return game == &game_bomber ? CONTROL_BOMBER : game == &game_tron ? CONTROL_TRON :
         game == &game_racers ? CONTROL_RACERS : game == &game_football ? CONTROL_FOOTBALL :
-        game == &game_towers ? CONTROL_TOWERS : game == &game_fps ? CONTROL_FPS : CONTROL_DEFAULT;
+        game == &game_towers ? CONTROL_TOWERS : game == &game_fps ? CONTROL_FPS :
+        game == &game_tanks ? CONTROL_TANKS : CONTROL_DEFAULT;
 }
 
 static void set_state(int s)
@@ -274,6 +282,17 @@ static void games_menu(void)
 
     int n = __builtin_popcount(connected_mask());
     bool ready = mode == MODE_SINGLE || n >= 2;
+#ifdef CONFIG_HUBGAMES_FULL_DOOM
+    bool full_doom = !menu[game_sel].game && mode == MODE_SINGLE;
+    if (full_doom && (in[0].pressed & BTN_A)) {
+        if (doom_available()) {
+            state = S_DOOM;
+            net_set_controller(CONTROL_DOOM);
+            if (!doom_run()) set_state(S_GAMES);
+        }
+        return;
+    }
+#endif
     if ((in[0].pressed & BTN_A) && ready) {
         start_game();
         return;
@@ -297,6 +316,11 @@ static void games_menu(void)
 
     char buf[32];
     int y = screen_h - 6 * scale;
+#ifdef CONFIG_HUBGAMES_FULL_DOOM
+    if (full_doom) {
+        gfx_text_center(64, y, scale, C_GRAY, doom_available() ? "START = DOOM MENU" : "NO PSRAM / WAD");
+    } else
+#endif
     if (!ready) {
         gfx_text_center(64, y, scale, C_YELLOW, "NEED 2+ PLAYERS");
     } else if (mode != MODE_SINGLE) {
@@ -684,6 +708,12 @@ static void game_task(void *arg)
     int late = 0;
     while (1) {
         int64_t start = esp_timer_get_time();
+#ifdef CONFIG_HUBGAMES_FULL_DOOM
+        if (state == S_DOOM) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+#endif
         for (int p = 0; p < MAX_PLAYERS; p++)
             input_get(p, &in[p]);
         gfx_clear();

@@ -32,6 +32,9 @@ int main(void)
     input_get(11, &input);
     assert(input.connected && (input.pressed & BTN_A) && (input.held & BTN_RIGHT));
     input_get(11, &input); assert(!input.pressed);
+    packet(111, BTN_A | BTN_STRAFE_MODE);
+    input_get(11, &input);
+    assert(input.strafe && !(input.held & (BTN_RIGHT | BTN_STRAFE_MODE)) && (input.held & BTN_A));
     on_close(server, 111); input_get(11, &input); assert(!input.connected);
     packet(151, BTN_A); assert(fake_reply[0] == 12);
     input_get(11, &input); assert(input.pressed & BTN_A); // new player cannot inherit old edges
