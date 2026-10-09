@@ -53,3 +53,4 @@ extern const game_t game_tetris;
 extern const game_t game_pong;
 extern const game_t game_dk;
 extern const game_t game_mario;
+extern const game_t game_tanks;

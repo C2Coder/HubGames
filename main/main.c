@@ -40,6 +40,7 @@ static const struct {
     {"PONG", &game_pong, M_SINGLE | M_VS | M_PARTY},
     {"DONKEY KONG", &game_dk, M_SINGLE | M_VS},
     {"MARIO", &game_mario, M_SINGLE | M_VS},
+    {"TANKS", &game_tanks, M_SINGLE | M_VS | M_PARTY},
 };
 #define MENU_N (int)(sizeof(menu) / sizeof(menu[0]))
 
@@ -135,22 +136,34 @@ static void region_band(int r, int dy, int h)
 
 // ---- menus ----
 
-// list over a darkened background with a sliding highlight bar
+// list over a darkened background with a sliding highlight bar, scrolls
+// when it doesn't fit above the status line
 static void draw_list(const char *const *items, int n, int sel, int y0)
 {
     int scale = text_scale();
     int pitch = scale == 2 ? 16 : 8, bar_h = 5 * scale + 3;
-    int target = (y0 + sel * pitch - 2) * 8;
+    int visible = (screen_h - 7 * scale - y0) / pitch;
+    int first = 0;
+    if (n > visible) {
+        first = sel - visible / 2;
+        if (first < 0)
+            first = 0;
+        if (first > n - visible)
+            first = n - visible;
+        n = first + visible;
+    }
+
+    int target = (y0 + (sel - first) * pitch - 2) * 8;
     if (bar_y < 0)
         bar_y = target;
     bar_y += (target - bar_y) / 3;
     if (abs(target - bar_y) < 3)
         bar_y = target;
 
-    gfx_darken(0, y0 - 2, HUB75_W, n * pitch + 1);
+    gfx_darken(0, y0 - 2, HUB75_W, (n - first) * pitch + 1);
     gfx_rect(8, bar_y / 8, HUB75_W - 16, bar_h, gfx_hsv(t / 2, 200, 90));
-    for (int i = 0; i < n; i++)
-        gfx_text_center(64, y0 + i * pitch, scale, i == sel ? C_WHITE : C_GRAY, items[i]);
+    for (int i = first; i < n; i++)
+        gfx_text_center(64, y0 + (i - first) * pitch, scale, i == sel ? C_WHITE : C_GRAY, items[i]);
 }
 
 static void draw_players_row(int y)
