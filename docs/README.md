@@ -34,7 +34,7 @@ git submodule update --init
 doom/flash-wad.sh   # downloads doom1.wad if missing, inside an ESP-IDF shell
 ```
 
-Joystick/arrows move, A fire (and menu confirm), B use/open, pause button = Doom menu. The controller page has a DOOM layout (layout button): joystick forward/back, turn arrows with FIRE between them, USE below. Quitting Doom restarts the board back to HubGames.
+Joystick/arrows move, A fire (and menu confirm), B use/open, pause button = Doom menu. The controller page has a DOOM layout (layout button): joystick moves forward/back and strafes left/right, arrows turn, FIRE between them, USE below. Quitting Doom restarts the board back to HubGames.
 
 ## Playing
 

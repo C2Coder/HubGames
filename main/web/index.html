@@ -54,10 +54,11 @@ html, body { height: 100%; background: #111; color: #eee; font-family: sans-seri
 <script>
 const BITS = { up: 1, down: 2, left: 4, right: 8, a: 16, b: 32, start: 64 };
 const who = document.getElementById('who');
-let btn = 0, jx = 0, jy = 0, ws;
+let btn = 0, jx = 0, jy = 0, ws, layout = 'stick';
 
 function send() {
-  if (ws && ws.readyState === 1) ws.send(new Int8Array([btn, jx, jy]));
+  // 128 = Doom layout, the board treats joystick x as strafe
+  if (ws && ws.readyState === 1) ws.send(new Int8Array([btn | (layout === 'doom' ? 128 : 0), jx, jy]));
 }
 
 function show(p) {
@@ -95,7 +96,6 @@ let jid = null;
 function jmove(e) {
   const r = joy.getBoundingClientRect(), R = r.width / 2;
   let x = e.clientX - r.left - R, y = e.clientY - r.top - R;
-  if (layout === 'doom') x = 0; // only forward / back
   const d = Math.hypot(x, y);
   if (d > R) { x *= R / d; y *= R / d; }
   knob.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
@@ -116,12 +116,12 @@ joy.addEventListener('pointermove', e => { if (e.pointerId === jid) jmove(e); })
 joy.addEventListener('pointerup', jend);
 joy.addEventListener('pointercancel', jend);
 
-// layout: joystick, arrows, or doom (stick forward/back, turn arrows + fire),
+// layout: joystick, arrows, or doom (stick moves + strafes, arrows turn, fire),
 // remembered per phone
 const LAYOUTS = ['stick', 'arrows', 'doom'];
 const swap = document.getElementById('swap'), dpad = document.getElementById('dpad');
 const ab = document.getElementById('ab'), doompad = document.getElementById('doompad');
-let layout = 'stick';
+
 function setLayout(l) {
   layout = l;
   joy.classList.toggle('hide', l === 'arrows');

@@ -44,8 +44,11 @@ void input_get(int p, input_t *in)
     int jx = conn ? s->jx : 0, jy = conn ? s->jy : 0;
     portEXIT_CRITICAL(&lock);
 
-    // joystick gives only the dominant direction
-    if (abs(jx) > abs(jy)) {
+    bool strafe = b & BTN_STRAFE_MODE;
+    b &= ~BTN_STRAFE_MODE;
+
+    // joystick gives only the dominant direction, in strafe mode only up/down
+    if (!strafe && abs(jx) > abs(jy)) {
         if (jx > DEADZONE) b |= BTN_RIGHT;
         if (jx < -DEADZONE) b |= BTN_LEFT;
     } else {
@@ -57,6 +60,7 @@ void input_get(int p, input_t *in)
     in->pressed = b & ~prev[p];
     in->jx = jx;
     in->jy = jy;
+    in->strafe = strafe;
     in->connected = conn;
     prev[p] = b;
 }

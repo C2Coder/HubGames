@@ -9,6 +9,8 @@
 #define DOOM_KEY_LEFTARROW  0xac
 #define DOOM_KEY_UPARROW    0xad
 #define DOOM_KEY_DOWNARROW  0xaf
+#define DOOM_KEY_STRAFE_L   0xa0
+#define DOOM_KEY_STRAFE_R   0xa1
 #define DOOM_KEY_USE        0xa2
 #define DOOM_KEY_FIRE       0xa3
 #define DOOM_KEY_ESCAPE     27

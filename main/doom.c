@@ -33,8 +33,11 @@ static void draw(const uint32_t *fb)
 }
 
 // phone buttons -> Doom keys, A also confirms menus, B also answers yes
+#define STRAFE_L 0x100 // virtual buttons from the joystick in strafe mode
+#define STRAFE_R 0x200
+
 static const struct {
-    uint8_t btn;
+    uint16_t btn;
     unsigned char key;
 } keymap[] = {
     {BTN_UP, DOOM_KEY_UPARROW},
@@ -46,6 +49,8 @@ static const struct {
     {BTN_B, DOOM_KEY_USE},
     {BTN_B, 'y'},
     {BTN_START, DOOM_KEY_ESCAPE},
+    {STRAFE_L, DOOM_KEY_STRAFE_L},
+    {STRAFE_R, DOOM_KEY_STRAFE_R},
 };
 #define KEYMAP_N (int)(sizeof(keymap) / sizeof(keymap[0]))
 
@@ -63,7 +68,7 @@ static void push(int pressed, unsigned char key)
 
 static int get_key(int *pressed, unsigned char *key)
 {
-    static uint8_t held;
+    static uint16_t held;
     static bool started;
 
     if (q_head == q_tail) {
@@ -73,11 +78,16 @@ static int get_key(int *pressed, unsigned char *key)
         }
         input_t in;
         input_get(0, &in);
-        uint8_t changed = in.held ^ held;
+        uint16_t now = in.held;
+        if (in.strafe && in.jx < -40)
+            now |= STRAFE_L;
+        if (in.strafe && in.jx > 40)
+            now |= STRAFE_R;
+        uint16_t changed = now ^ held;
         for (int i = 0; i < KEYMAP_N; i++)
             if (changed & keymap[i].btn)
-                push(!!(in.held & keymap[i].btn), keymap[i].key);
-        held = in.held;
+                push(!!(now & keymap[i].btn), keymap[i].key);
+        held = now;
     }
     if (q_head == q_tail)
         return 0;
