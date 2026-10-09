@@ -1,0 +1,104 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>HubGames</title>
+<style>
+* { box-sizing: border-box; margin: 0; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; background: #111; color: #eee; font-family: sans-serif; overflow: hidden; touch-action: none; }
+#bar { height: 16vh; display: flex; align-items: center; justify-content: center; gap: 8vw; }
+#who { font-size: 8vh; font-weight: bold; color: #888; min-width: 30vw; text-align: center; }
+#start { width: 16vh; height: 9vh; border-radius: 5vh; background: #333; display: flex; align-items: center; justify-content: center; font-size: 5vh; color: #aaa; }
+#pad { height: 84vh; display: flex; align-items: center; justify-content: space-around; padding-bottom: 4vh; }
+#joy { width: 46vh; height: 46vh; border-radius: 50%; background: #222; border: 0.5vh solid #444; position: relative; }
+#knob { width: 20vh; height: 20vh; border-radius: 50%; background: #666; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+#dpad { display: grid; grid-template-columns: repeat(3, 15vh); grid-template-rows: repeat(3, 15vh); gap: 1vh; }
+.k { background: #333; border-radius: 2vh; display: flex; align-items: center; justify-content: center; font-size: 6vh; color: #aaa; }
+.on { filter: brightness(1.8); }
+#ab { position: relative; width: 44vh; height: 44vh; }
+.r { position: absolute; width: 20vh; height: 20vh; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 8vh; font-weight: bold; color: #fff; }
+#a { right: 0; top: 2vh; background: #b22; }
+#b { left: 0; bottom: 2vh; background: #c80; }
+#rot { display: none; height: 100%; align-items: center; justify-content: center; font-size: 6vw; color: #888; }
+@media (orientation: portrait) { #rot { display: flex; } #bar, #pad { display: none; } }
+</style>
+</head>
+<body>
+<div id="rot">Rotate your phone</div>
+<div id="bar"><div id="who">connecting...</div><div id="start" class="k" data-b="start">II</div></div>
+<div id="pad">
+  <div id="joy"><div id="knob"></div></div>
+  <div id="dpad">
+    <div></div><div class="k" data-b="up">&#9650;</div><div></div>
+    <div class="k" data-b="left">&#9664;</div><div></div><div class="k" data-b="right">&#9654;</div>
+    <div></div><div class="k" data-b="down">&#9660;</div><div></div>
+  </div>
+  <div id="ab"><div id="a" class="r" data-b="a">A</div><div id="b" class="r" data-b="b">B</div></div>
+</div>
+<script>
+const BITS = { up: 1, down: 2, left: 4, right: 8, a: 16, b: 32, start: 64 };
+const who = document.getElementById('who');
+let btn = 0, jx = 0, jy = 0, ws;
+
+function send() {
+  if (ws && ws.readyState === 1) ws.send(new Int8Array([btn, jx, jy]));
+}
+
+function show(p) {
+  who.textContent = p < 0 ? 'connecting...' : p === 0 ? 'full' : 'P' + p;
+  who.style.color = p === 1 ? '#0f0' : p === 2 ? '#08f' : '#888';
+}
+
+function connect() {
+  ws = new WebSocket('ws://' + location.host + '/ws');
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = send;
+  ws.onmessage = e => show(new Uint8Array(e.data)[0]);
+  ws.onclose = () => { show(-1); setTimeout(connect, 1000); };
+}
+connect();
+setInterval(send, 100);
+
+document.querySelectorAll('[data-b]').forEach(el => {
+  const bit = BITS[el.dataset.b];
+  el.addEventListener('pointerdown', e => {
+    el.setPointerCapture(e.pointerId);
+    btn |= bit;
+    el.classList.add('on');
+    if (navigator.vibrate) navigator.vibrate(10);
+    send();
+  });
+  const up = () => { btn &= ~bit; el.classList.remove('on'); send(); };
+  el.addEventListener('pointerup', up);
+  el.addEventListener('pointercancel', up);
+});
+
+const joy = document.getElementById('joy'), knob = document.getElementById('knob');
+let jid = null;
+
+function jmove(e) {
+  const r = joy.getBoundingClientRect(), R = r.width / 2;
+  let x = e.clientX - r.left - R, y = e.clientY - r.top - R;
+  const d = Math.hypot(x, y);
+  if (d > R) { x *= R / d; y *= R / d; }
+  knob.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
+  const nx = Math.round(x / R * 100), ny = Math.round(y / R * 100);
+  if (nx !== jx || ny !== jy) { jx = nx; jy = ny; send(); }
+}
+
+function jend(e) {
+  if (e.pointerId !== jid) return;
+  jid = null;
+  jx = jy = 0;
+  knob.style.transform = 'translate(-50%, -50%)';
+  send();
+}
+
+joy.addEventListener('pointerdown', e => { jid = e.pointerId; joy.setPointerCapture(jid); jmove(e); });
+joy.addEventListener('pointermove', e => { if (e.pointerId === jid) jmove(e); });
+joy.addEventListener('pointerup', jend);
+joy.addEventListener('pointercancel', jend);
+</script>
+</body>
+</html>
