@@ -24,6 +24,18 @@ idf.py build flash monitor
 
 Flashing goes over native USB (USB-Serial-JTAG), no boot button needed.
 
+## Doom
+
+DOOM (shareware, 1 PLAYER) runs from `components/doomgeneric` - [doomgeneric](https://github.com/ozkl/doomgeneric) as a git submodule, GPL-2.0, glue in `doom_port.c` and `main/doom.c`. Needs the 8 MB PSRAM of the N16R8 module.
+Flash the WAD once (separate partition, app flashes don't touch it):
+
+```sh
+git submodule update --init
+doom/flash-wad.sh   # downloads doom1.wad if missing, inside an ESP-IDF shell
+```
+
+Joystick/arrows move, A fire (and menu confirm), B use/open, pause button = Doom menu. Quitting Doom restarts the board back to HubGames.
+
 ## Playing
 
 Connect a phone to the open WiFi `HubGames` and open `http://192.168.4.1`. Phones get P1-P4 in connect order.

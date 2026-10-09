@@ -2,10 +2,12 @@
 #include <stdlib.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 
 #include "ambient.h"
+#include "doom.h"
 #include "fx.h"
 #include "game.h"
 #include "gfx.h"
@@ -41,12 +43,13 @@ static const struct {
     {"DONKEY KONG", &game_dk, M_SINGLE | M_VS},
     {"MARIO", &game_mario, M_SINGLE | M_VS},
     {"TANKS", &game_tanks, M_SINGLE | M_VS | M_PARTY},
+    {"DOOM", NULL, M_SINGLE}, // special, see games_menu
 };
 #define MENU_N (int)(sizeof(menu) / sizeof(menu[0]))
 
 enum { SET_PANELS, SET_BRIGHT, SET_TEST, SET_N };
 
-enum { S_MAIN, S_GAMES, S_COUNTDOWN, S_PLAY, S_PAUSE, S_RESULT, S_AMBIENT, S_SETTINGS, S_PANELTEST };
+enum { S_MAIN, S_GAMES, S_COUNTDOWN, S_PLAY, S_PAUSE, S_RESULT, S_AMBIENT, S_SETTINGS, S_PANELTEST, S_DOOM };
 
 static uint32_t t; // frame counter
 static int state = S_MAIN, fade, timer;
@@ -61,7 +64,8 @@ static bool won, scaled;
 static int n_inst;
 static int inst_player[MAX_PLAYERS];
 static bool over[MAX_PLAYERS];
-static uint8_t gs[MAX_PLAYERS][GAME_STATE_MAX] __attribute__((aligned(4)));
+// in PSRAM, internal RAM is needed for WiFi and DMA
+static EXT_RAM_BSS_ATTR uint8_t gs[MAX_PLAYERS][GAME_STATE_MAX] __attribute__((aligned(4)));
 static input_t in[MAX_PLAYERS];
 
 static void start_game(void);
@@ -243,7 +247,13 @@ static void games_menu(void)
 
     int n = __builtin_popcount(connected_mask());
     bool ready = mode == MODE_SINGLE || n >= 2;
-    if ((in[0].pressed & BTN_A) && ready) {
+    bool doom = !menu[game_sel].game;
+    if ((in[0].pressed & BTN_A) && doom && doom_available()) {
+        state = S_DOOM;
+        doom_run();
+        return;
+    }
+    if ((in[0].pressed & BTN_A) && ready && !doom) {
         start_game();
         return;
     }
@@ -266,7 +276,9 @@ static void games_menu(void)
 
     char buf[20];
     int y = screen_h - 6 * scale;
-    if (!ready) {
+    if (doom) {
+        gfx_text_center(64, y, scale, C_GRAY, doom_available() ? "START = DOOM MENU" : "NO WAD FLASHED");
+    } else if (!ready) {
         gfx_text_center(64, y, scale, C_YELLOW, "NEED 2+ PLAYERS");
     } else if (mode != MODE_SINGLE) {
         int max = menu[game_sel].game->shared ? MAX_PLAYERS : hub75_panels;
@@ -601,6 +613,10 @@ static void game_task(void *arg)
     int64_t worst = 0;
     while (1) {
         int64_t start = esp_timer_get_time();
+        if (state == S_DOOM) { // Doom draws from its own task
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
         for (int p = 0; p < MAX_PLAYERS; p++)
             input_get(p, &in[p]);
         gfx_clear();
