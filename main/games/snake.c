@@ -14,7 +14,7 @@ typedef struct {
     int player;
     bool versus;
     int cols, rows;
-    uint8_t occ[MAX_CELLS];          // occupied cells, y * cols + x
+    uint8_t occ[(MAX_CELLS + 7) / 8];          // occupied cells, y * cols + x
     uint8_t x[MAX_CELLS], y[MAX_CELLS]; // body ring buffer, head at index head
     int head, len;
     int dx, dy;
@@ -25,7 +25,18 @@ typedef struct {
     bool dead;
 } snake_t;
 
-_Static_assert(sizeof(snake_t) <= GAME_STATE_MAX, "snake state too big");
+_Static_assert(sizeof(snake_t) <= PANEL_STATE_MAX, "snake state too big");
+
+static bool occupied(const snake_t *s, int cell)
+{
+    return (s->occ[cell >> 3] >> (cell & 7)) & 1u;
+}
+static void occupy(snake_t *s, int cell, bool on)
+{
+    uint8_t bit = 1u << (cell & 7);
+    if (on) s->occ[cell >> 3] |= bit;
+    else s->occ[cell >> 3] &= ~bit;
+}
 
 static bool place_food(snake_t *s)
 {
@@ -33,14 +44,14 @@ static bool place_food(snake_t *s)
     if (s->len >= n)
         return false;
     int i = esp_random() % n;
-    while (s->occ[i])
+    while (occupied(s, i))
         i = (i + 1) % n;
     s->fx = i % s->cols;
     s->fy = i / s->cols;
     return true;
 }
 
-static void init(void *p, view_t v, uint8_t players, bool versus)
+static void init(void *p, view_t v, player_mask_t players, bool versus)
 {
     snake_t *s = p;
     memset(s, 0, sizeof(*s));
@@ -54,7 +65,7 @@ static void init(void *p, view_t v, uint8_t players, bool versus)
     for (int i = 0; i < s->len; i++) {
         s->x[i] = s->cols / 4 + i;
         s->y[i] = s->rows / 2;
-        s->occ[s->y[i] * s->cols + s->x[i]] = 1;
+        occupy(s, s->y[i] * s->cols + s->x[i], true);
     }
     s->dx = 1;
     s->interval = 10;
@@ -112,9 +123,9 @@ static game_status_t update(void *p, const input_t *in)
     bool eat = hx == s->fx && hy == s->fy;
     if (!eat) {
         int t = (s->head - s->len + 1 + MAX_CELLS) % MAX_CELLS;
-        s->occ[s->y[t] * s->cols + s->x[t]] = 0;
+        occupy(s, s->y[t] * s->cols + s->x[t], false);
     }
-    if (s->occ[hy * s->cols + hx]) {
+    if (occupied(s, hy * s->cols + hx)) {
         die(s);
         return GAME_RUNNING;
     }
@@ -122,7 +133,7 @@ static game_status_t update(void *p, const input_t *in)
     s->head = (s->head + 1) % MAX_CELLS;
     s->x[s->head] = hx;
     s->y[s->head] = hy;
-    s->occ[hy * s->cols + hx] = 1;
+    occupy(s, hy * s->cols + hx, true);
 
     if (eat) {
         fx_burst(s->v.x + hx * CELL + 1, s->v.y + HUD + hy * CELL + 1, C_RED, 10);
@@ -148,8 +159,9 @@ static void draw(const void *p)
     gfx_text(v->x + 1, v->y, 1, C_WHITE, buf);
     if (s->versus)
     {
-        char tag[3] = {'P', '1' + s->player, 0};
-        gfx_text(v->x + v->w - 8, v->y, 1, c, tag);
+        char tag[16];
+        snprintf(tag, sizeof(tag), "P%d", s->player + 1);
+        gfx_text(v->x + v->w - gfx_text_width(1, tag) - 1, v->y, 1, c, tag);
     }
     gfx_rect(v->x, v->y + HUD - 1, v->w, 1, C_DARK);
 

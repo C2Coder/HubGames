@@ -1,4 +1,4 @@
-// Pong: two teams, left = P1+P3, right = P2+P4, an empty team is played by the AI.
+// Pong: odd-numbered players vs even-numbered players, up to six per team; AI fills an empty side.
 #include "game.h"
 
 #include <stdio.h>
@@ -33,8 +33,8 @@ typedef struct {
 typedef struct {
     view_t v;
     bool versus;
-    uint8_t players;
-    pad_t pad[4];
+    player_mask_t players;
+    pad_t pad[MAX_PLAYERS + 1];
     int npad;
     int pad_h;
     int16_t tx[TRAIL], ty[TRAIL]; // ball trail, px
@@ -71,12 +71,12 @@ static void add_pad(pong_t *s, int side, int player, int slot)
     pad_t *p = &s->pad[s->npad++];
     p->side = side;
     p->player = player;
-    p->x = side ? s->v.w - 4 - slot * 12 : 2 + slot * 12;
+    p->x = side ? s->v.w - 4 - slot * 6 : 2 + slot * 6;
     p->y = FX((s->v.h - s->pad_h) / 2);
     p->color = player_color[player >= 0 ? player : side];
 }
 
-static void init(void *st, view_t v, uint8_t players, bool versus)
+static void init(void *st, view_t v, player_mask_t players, bool versus)
 {
     pong_t *s = st;
     memset(s, 0, sizeof(*s));
@@ -278,12 +278,15 @@ static int score_of(const void *st, int player)
     return ((const pong_t *)st)->pts[player & 1];
 }
 
-static uint8_t winners(const void *st)
+static player_mask_t winners(const void *st)
 {
     const pong_t *s = st;
     if (s->winner < 0)
         return 0;
-    return s->players & (s->winner ? 0xA : 0x5);
+    player_mask_t mask = 0;
+    for (int p = s->winner; p < MAX_PLAYERS; p += 2)
+        mask |= 1u << p;
+    return s->players & mask;
 }
 
 const game_t game_pong = {

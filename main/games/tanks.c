@@ -11,7 +11,7 @@
 #define HUD       6
 #define COLS      32
 #define MAX_ROWS  30
-#define NT        6   // tanks: 4 players, or player + 5 AI
+#define NT        MAX_PLAYERS // tanks: one per player slot (up to 8 play), or player + 5 AI
 #define NB        32  // bullets
 #define TS        5   // tank size in px
 #define PROT_T    50  // spawn protection, ticks
@@ -53,7 +53,8 @@ typedef struct {
 enum { ST_PLAY, ST_PAUSE, ST_END };
 
 typedef struct {
-    uint8_t players;
+    player_mask_t players;
+    int human;
     bool versus;
     int rows, layout;
     uint8_t grid[MAX_ROWS][COLS]; // 0 empty, 1 wall, 2 brick
@@ -65,7 +66,7 @@ typedef struct {
     // versus
     int wins[MAX_PLAYERS];
     int round_winner; // -1 = nobody
-    uint8_t win_mask;
+    player_mask_t win_mask;
     // single
     int lives, wave, kills, cleared, respawn_t;
 } tanks_t;
@@ -312,7 +313,7 @@ static void fire_bullet(tanks_t *s, int i)
 
 static uint16_t tank_color(const tanks_t *s, int i)
 {
-    return s->t[i].ai ? C_AI : player_color[i];
+    return s->t[i].ai ? C_AI : player_color[s->versus ? i : s->human];
 }
 
 static void kill_tank(tanks_t *s, int k, int owner)
@@ -487,10 +488,11 @@ static void new_round(tanks_t *s)
 {
     load_layout(s);
     clear_bullets(s);
+    int rank = 0;
     for (int p = 0; p < MAX_PLAYERS; p++) {
         s->t[p].alive = false;
         if (playing(s, p))
-            start_tank(s, p, p, false);
+            start_tank(s, p, rank++ % 8, false);
     }
     s->st = ST_PLAY;
     s->pt = 0;
@@ -512,11 +514,12 @@ static void start_wave(tanks_t *s)
     s->pt = 0;
 }
 
-static void init(void *p, view_t v, uint8_t players, bool versus)
+static void init(void *p, view_t v, player_mask_t players, bool versus)
 {
     tanks_t *s = p;
     memset(s, 0, sizeof(*s));
     s->players = players;
+    s->human = players ? __builtin_ctz(players) : 0;
     s->versus = versus;
     s->rows = (v.h - HUD) / TILE;
     if (s->rows > MAX_ROWS)
@@ -605,8 +608,8 @@ static game_status_t update(void *p, const input_t *in)
         if (t->ai) {
             ai_think(s, i, &dx, &dy, &fire);
         } else {
-            read_dir(&in[i], t, &dx, &dy);
-            fire = in[i].held & BTN_A;
+            read_dir(&in[s->versus ? i : s->human], t, &dx, &dy);
+            fire = in[s->versus ? i : s->human].held & BTN_A;
         }
         if (dx || dy) {
             t->fx = dx;
@@ -685,15 +688,16 @@ static void draw(const void *p)
             gfx_rect(s->b[j].x >> 8, s->b[j].y >> 8, 2, 2, C_WHITE);
 
     if (s->versus) {
+        int rank = 0, n = __builtin_popcount(s->players);
         for (int pl = 0; pl < MAX_PLAYERS; pl++) {
             if (!playing(s, pl))
                 continue;
             snprintf(buf, sizeof(buf), "%d", s->wins[pl]);
-            gfx_text_center(16 + pl * 32, 0, 1, player_color[pl], buf);
+            gfx_text_center((2 * rank++ + 1) * HUB75_W / (2 * n), 0, 1, player_color[pl], buf);
         }
     } else {
         snprintf(buf, sizeof(buf), "L%d", s->lives);
-        gfx_text(1, 0, 1, player_color[0], buf);
+        gfx_text(1, 0, 1, player_color[s->human], buf);
         snprintf(buf, sizeof(buf), "W%d", s->wave);
         gfx_text_center(64, 0, 1, C_GRAY, buf);
         snprintf(buf, sizeof(buf), "%d", s->kills * 100 + s->cleared * 250);
@@ -731,13 +735,14 @@ static int score_of(const void *p, int player)
     return ((const tanks_t *)p)->wins[player];
 }
 
-static uint8_t winners(const void *p)
+static player_mask_t winners(const void *p)
 {
     return ((const tanks_t *)p)->win_mask;
 }
 
 const game_t game_tanks = {
     .shared = true,
+    .max_players = 8, // spawn spots
     .big = BIG_NATIVE,
     .init = init,
     .update = update,

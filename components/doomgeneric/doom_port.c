@@ -104,12 +104,12 @@ static void doom_task(void *arg)
         doomgeneric_Tick();
 }
 
-void doom_start(const doom_hooks_t *h)
+bool doom_start(const doom_hooks_t *h)
 {
     hooks = *h;
     if (!wad_map()) {
         ESP_LOGE("doom", "wad mmap failed");
-        return;
+        return false;
     }
     esp_vfs_t vfs = {
         .flags = ESP_VFS_FLAG_DEFAULT,
@@ -121,8 +121,12 @@ void doom_start(const doom_hooks_t *h)
     };
     ESP_ERROR_CHECK(esp_vfs_register("/wad", &vfs, NULL));
     // big stack in PSRAM, internal RAM is tight
-    if (xTaskCreatePinnedToCoreWithCaps(doom_task, "doom", 65536, NULL, 5, NULL, 1, MALLOC_CAP_SPIRAM) != pdPASS)
+    if (xTaskCreatePinnedToCoreWithCaps(doom_task, "doom", 65536, NULL, 5, NULL, 1, MALLOC_CAP_SPIRAM) != pdPASS) {
         ESP_LOGE("doom", "task create failed");
+        esp_vfs_unregister("/wad");
+        return false;
+    }
+    return true;
 }
 
 // ---- doomgeneric platform ----

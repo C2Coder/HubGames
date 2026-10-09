@@ -102,8 +102,8 @@ bool doom_available(void)
     return doom_wad_ok();
 }
 
-void doom_run(void)
+bool doom_run(void)
 {
     doom_hooks_t h = {.draw = draw, .get_key = get_key};
-    doom_start(&h);
+    return doom_start(&h);
 }

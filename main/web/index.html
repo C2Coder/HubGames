@@ -8,7 +8,7 @@
 * { box-sizing: border-box; margin: 0; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
 html, body { height: 100%; background: #111; color: #eee; font-family: sans-serif; overflow: hidden; touch-action: none; }
 #bar { position: absolute; top: 0; left: 0; right: 0; height: 16vh; display: flex; align-items: center; justify-content: center; gap: 6vw; z-index: 1; }
-#who { font-size: 8vh; font-weight: bold; color: #888; min-width: 26vw; text-align: center; }
+#who { font-size: 6vh; font-weight: bold; color: #888; min-width: 13vw; text-align: center; }
 .t { height: 9vh; padding: 0 3vh; border-radius: 5vh; background: #333; display: flex; align-items: center; justify-content: center; font-size: 4.5vh; color: #aaa; }
 #pad { height: 100vh; display: flex; }
 #left, #right { flex: 1; display: flex; align-items: center; justify-content: center; padding-top: 10vh; }
@@ -17,6 +17,8 @@ html, body { height: 100%; background: #111; color: #eee; font-family: sans-seri
 #knob { width: 22vh; height: 22vh; border-radius: 50%; background: #666; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
 #dpad { display: grid; grid-template-columns: repeat(3, 19vh); grid-template-rows: repeat(3, 19vh); gap: 1.5vh; }
 .k { background: #333; border-radius: 2.5vh; display: flex; align-items: center; justify-content: center; font-size: 8vh; color: #aaa; }
+.caption { position: absolute; bottom: 3vh; left: 0; right: 0; text-align: center; font-size: 2.8vh; }
+#hint { font-size: 2.7vh; max-width: 28vw; text-align: center; }
 .on { filter: brightness(1.8); }
 .hide { display: none !important; }
 #ab { position: relative; width: 50vh; height: 50vh; }
@@ -33,7 +35,7 @@ html, body { height: 100%; background: #111; color: #eee; font-family: sans-seri
 </head>
 <body>
 <div id="rot">Rotate your phone</div>
-<div id="bar"><div id="swap" class="t">ARROWS</div><div id="who">connecting...</div><div class="t" data-b="start">II</div></div>
+<div id="bar"><div id="swap" class="t">ARROWS</div><div id="who">connecting...</div><div id="hint"></div><div class="t" data-b="start">II</div></div>
 <div id="pad">
   <div id="left">
     <div id="joy"><div id="knob"></div></div>
@@ -44,7 +46,7 @@ html, body { height: 100%; background: #111; color: #eee; font-family: sans-seri
     </div>
   </div>
   <div id="right">
-    <div id="ab"><div id="a" class="r" data-b="a">A</div><div id="b" class="r" data-b="b">B</div></div>
+    <div id="ab"><div id="a" class="r" data-b="a">A<span class="caption" id="acap"></span></div><div id="b" class="r" data-b="b">B<span class="caption" id="bcap"></span></div></div>
     <div id="doompad" class="hide">
       <div id="fire" class="k" data-b="a">FIRE</div>
       <div class="k turn" data-b="left">&#9664;</div><div class="k turn" data-b="right">&#9654;</div>
@@ -55,24 +57,49 @@ html, body { height: 100%; background: #111; color: #eee; font-family: sans-seri
 <script>
 const BITS = { up: 1, down: 2, left: 4, right: 8, a: 16, b: 32, start: 64 };
 const who = document.getElementById('who');
-let btn = 0, jx = 0, jy = 0, ws, layout = 'stick';
+let btn = 0, jx = 0, jy = 0, ws, pendingSend = null, lastSend = 0;
 
-function send() {
-  // 128 = Doom layout, the board treats joystick x as strafe
-  if (ws && ws.readyState === 1) ws.send(new Int8Array([btn | (layout === 'doom' ? 128 : 0), jx, jy]));
+function send(urgent = true) {
+  const delay = 20 - (performance.now() - lastSend);
+  if (!urgent && delay > 0) {
+    if (pendingSend === null) pendingSend = setTimeout(() => { pendingSend = null; send(); }, delay);
+    return;
+  }
+  if (pendingSend !== null) { clearTimeout(pendingSend); pendingSend = null; }
+  if (ws && ws.readyState === 1 && ws.bufferedAmount < 256) {
+    ws.send(new Int8Array([btn | (currentProfile === 10 && !arrows ? 128 : 0), jx, jy]));
+    lastSend = performance.now();
+  }
 }
 
-function show(p) {
+let currentProfile = -1;
+const profiles = [
+  ['', '', ''], ['BOMB', '', 'MOVE'], ['BOOST', '', 'TURN'],
+  ['ITEM', 'DRIFT', 'LEFT / RIGHT: STEER'], ['KICK', 'SPRINT', 'MOVE'],
+  ['ROTATE', 'DROP', 'LEFT / RIGHT: MOVE'], ['FIRE', 'STRAFE', 'STICK: MOVE + TURN'],
+  ['RESUME', 'QUIT', 'PAUSED'], ['AGAIN', 'MENU', 'ROUND OVER'], ['NEXT', 'MENU', 'PARTY CUP'],
+  ['FIRE', 'USE', 'STICK: MOVE + STRAFE'], ['FIRE', '', 'MOVE']
+];
+function show(p, profile = 0, color) {
+  if (profile !== currentProfile) {
+    releaseControls();
+    currentProfile = profile;
+    syncLayout();
+    const labels = profiles[profile] || profiles[0];
+    document.getElementById('acap').textContent = labels[0];
+    document.getElementById('bcap').textContent = labels[1];
+    document.getElementById('hint').textContent = labels[2];
+  }
   who.textContent = p < 0 ? 'connecting...' : p === 0 ? 'full' : 'P' + p;
-  who.style.color = ['#888', '#0f0', '#08f', '#fc0', '#f0f'][p < 0 ? 0 : p];
+  who.style.color = color !== undefined ? `rgb(${Math.round((color >> 11) * 255 / 31)},${Math.round(((color >> 5) & 63) * 255 / 63)},${Math.round((color & 31) * 255 / 31)})` : ['#888', '#0f0', '#08f', '#fc0', '#f0f', '#ff6000', '#0ff', '#fff', '#8040ff', '#b0ff00', '#ff3030', '#00b080', '#ff90c0'][p < 0 ? 0 : p] || '#888';
 }
 
 function connect() {
   ws = new WebSocket('ws://' + location.host + '/ws');
   ws.binaryType = 'arraybuffer';
   ws.onopen = send;
-  ws.onmessage = e => show(new Uint8Array(e.data)[0]);
-  ws.onclose = () => { show(-1); setTimeout(connect, 1000); };
+  ws.onmessage = e => { const r = new Uint8Array(e.data); show(r[0], r[1] || 0, r.length >= 4 ? r[2] | (r[3] << 8) : undefined); };
+  ws.onclose = () => { releaseControls(); show(-1); setTimeout(connect, 1000); };
 }
 connect();
 setInterval(send, 100);
@@ -101,7 +128,7 @@ function jmove(e) {
   if (d > R) { x *= R / d; y *= R / d; }
   knob.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
   const nx = Math.round(x / R * 100), ny = Math.round(y / R * 100);
-  if (nx !== jx || ny !== jy) { jx = nx; jy = ny; send(); }
+  if (nx !== jx || ny !== jy) { jx = nx; jy = ny; send(false); }
 }
 
 function jend(e) {
@@ -117,24 +144,35 @@ joy.addEventListener('pointermove', e => { if (e.pointerId === jid) jmove(e); })
 joy.addEventListener('pointerup', jend);
 joy.addEventListener('pointercancel', jend);
 
-// layout: joystick, arrows, or doom (stick moves + strafes, arrows turn, fire),
-// remembered per phone
-const LAYOUTS = ['stick', 'arrows', 'doom'];
-const swap = document.getElementById('swap'), dpad = document.getElementById('dpad');
-const ab = document.getElementById('ab'), doompad = document.getElementById('doompad');
-
-function setLayout(l) {
-  layout = l;
-  joy.classList.toggle('hide', l === 'arrows');
-  dpad.classList.toggle('hide', l !== 'arrows');
-  ab.classList.toggle('hide', l === 'doom');
-  doompad.classList.toggle('hide', l !== 'doom');
-  swap.textContent = l.toUpperCase();
-  try { localStorage.setItem('layout', l); } catch (e) {}
+function releaseControls() {
+  btn = jx = jy = 0;
+  jid = null;
+  knob.style.transform = 'translate(-50%, -50%)';
+  document.querySelectorAll('.on').forEach(el => el.classList.remove('on'));
+  send();
 }
-try { layout = localStorage.getItem('layout') || (localStorage.getItem('arrows') ? 'arrows' : 'stick'); } catch (e) {}
-setLayout(LAYOUTS.includes(layout) ? layout : 'stick');
-swap.addEventListener('click', () => setLayout(LAYOUTS[(LAYOUTS.indexOf(layout) + 1) % LAYOUTS.length]));
+window.addEventListener('blur', releaseControls);
+document.addEventListener('visibilitychange', () => { if (document.hidden) releaseControls(); });
+
+// joystick or arrows, remembered per phone
+const swap = document.getElementById('swap'), dpad = document.getElementById('dpad');
+function setArrows(on) {
+  releaseControls();
+  syncLayout();
+  try { localStorage.setItem('arrows', on ? '1' : ''); } catch (e) {}
+}
+function syncLayout() {
+  const doom = currentProfile === 10;
+  joy.classList.toggle('hide', arrows);
+  dpad.classList.toggle('hide', !arrows);
+  document.getElementById('ab').classList.toggle('hide', doom);
+  document.getElementById('doompad').classList.toggle('hide', !doom);
+  swap.textContent = arrows ? 'STICK' : 'ARROWS';
+}
+let arrows = false;
+try { arrows = !!localStorage.getItem('arrows'); } catch (e) {}
+setArrows(arrows);
+swap.addEventListener('click', () => { arrows = !arrows; setArrows(arrows); });
 </script>
 </body>
 </html>

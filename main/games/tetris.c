@@ -47,7 +47,7 @@ typedef struct {
     int bx, by; // board origin
 } tetris_t;
 
-_Static_assert(sizeof(tetris_t) <= GAME_STATE_MAX, "tetris state too big");
+_Static_assert(sizeof(tetris_t) <= PANEL_STATE_MAX, "tetris state too big");
 
 static uint32_t rnd(tetris_t *s)
 {
@@ -123,7 +123,7 @@ static void spawn(tetris_t *s)
     }
 }
 
-static void init(void *p, view_t v, uint8_t players, bool versus)
+static void init(void *p, view_t v, player_mask_t players, bool versus)
 {
     tetris_t *s = p;
     memset(s, 0, sizeof(*s));

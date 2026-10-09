@@ -23,4 +23,4 @@ typedef struct {
 } doom_hooks_t;
 
 bool doom_wad_ok(void);                   // doom1.wad flashed to the doomwad partition
-void doom_start(const doom_hooks_t *hooks); // starts the Doom task, quitting Doom reboots
+bool doom_start(const doom_hooks_t *hooks); // starts the Doom task, quitting Doom reboots

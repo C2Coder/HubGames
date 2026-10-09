@@ -3,18 +3,22 @@
 #include <string.h>
 
 // one octal digit per row, 4 = left pixel, 1 = right pixel
-static const char glyph_chars[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ :!-.?/><+%";
+static const char glyph_chars[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ :!-.?/><|(){};=+_#%";
 static const char glyph_rows[][6] = {
     "75557", "26227", "71747", "71317", "55711", "74717", "74757", "71222", "75757", "75717",
     "25755", "65656", "34443", "65556", "74647", "74644", "34553", "55755", "72227", "11152",
     "55655", "44447", "57755", "65555", "25552", "65644", "25563", "65655", "34216", "72222",
     "55557", "55552", "55575", "55255", "55222", "71247",
-    "00000", "02020", "22202", "00700", "00002", "61202", "11244", "42124", "12421", "02720", "51245",
+    "00000", "02020", "22202", "00700", "00002", "61202", "11244", "42124", "12421",
+    "52716", "24442", "21112", "26262", "23232", "02024", "07070", "02720", "00007", "57575", "51245",
 };
+
+_Static_assert(sizeof(glyph_chars) - 1 == sizeof(glyph_rows) / sizeof(glyph_rows[0]),
+               "font glyph table mismatch");
 
 void gfx_clear(void)
 {
-    memset(hub75_fb, 0, sizeof(hub75_fb));
+    memset(hub75_fb, 0, sizeof(uint16_t) * HUB75_W * screen_h);
 }
 
 void gfx_pixel(int x, int y, uint16_t c)
@@ -35,12 +39,21 @@ void gfx_rect(int x, int y, int w, int h, uint16_t c)
             hub75_fb[py][px] = c;
 }
 
+static char next_glyph(const char **s)
+{
+    const unsigned char *p = (const unsigned char *)*s;
+    if (p[0] == 0xc5 && (p[1] == 0xa0 || p[1] == 0xa1)) {
+        *s += 2;
+        return '|'; // Š / š
+    }
+    char ch = *(*s)++;
+    return ch >= 'a' && ch <= 'z' ? ch - 'a' + 'A' : ch;
+}
+
 void gfx_text(int x, int y, int scale, uint16_t c, const char *s)
 {
-    for (; *s; s++, x += 4 * scale) {
-        char ch = *s;
-        if (ch >= 'a' && ch <= 'z')
-            ch -= 'a' - 'A';
+    for (; *s; x += 4 * scale) {
+        char ch = next_glyph(&s);
         const char *p = strchr(glyph_chars, ch);
         if (!p)
             continue;
@@ -54,7 +67,8 @@ void gfx_text(int x, int y, int scale, uint16_t c, const char *s)
 
 int gfx_text_width(int scale, const char *s)
 {
-    int n = strlen(s);
+    int n = 0;
+    while (*s) { next_glyph(&s); n++; }
     return n ? n * 4 * scale - scale : 0;
 }
 

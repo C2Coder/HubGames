@@ -71,7 +71,7 @@ typedef struct {
     uint8_t coin_taken[LW * LH / 8 + 1];
 } mario_t;
 
-_Static_assert(sizeof(mario_t) <= GAME_STATE_MAX, "mario state too big");
+_Static_assert(sizeof(mario_t) <= PANEL_STATE_MAX, "mario state too big");
 
 static bool solid(int col, int row)
 {
@@ -154,7 +154,7 @@ static void respawn(mario_t *s)
     spawn_enemies(s);
 }
 
-static void init(void *p, view_t v, uint8_t players, bool versus)
+static void init(void *p, view_t v, player_mask_t players, bool versus)
 {
     mario_t *s = p;
     memset(s, 0, sizeof(*s));

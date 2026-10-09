@@ -36,8 +36,8 @@ void fx_burst(int x, int y, uint16_t color, int n)
 {
     for (int i = 0; i < n; i++) {
         particle_t *p = slot();
-        p->x = (x * fx_scale) << 8;
-        p->y = (y * fx_scale) << 8;
+        p->x = x * fx_scale * 256;
+        p->y = y * fx_scale * 256;
         p->vx = rnd(-300, 300) * fx_scale;
         p->vy = rnd(-400, 200) * fx_scale;
         p->color = i % 3 ? color : C_WHITE;
@@ -51,7 +51,7 @@ void fx_confetti(int n)
     for (int i = 0; i < n; i++) {
         particle_t *p = slot();
         p->x = rnd(0, HUB75_W - 1) << 8;
-        p->y = rnd(-40, 0) << 8;
+        p->y = rnd(-40, 0) * 256;
         p->vx = rnd(-60, 60);
         p->vy = rnd(80, 200);
         p->color = gfx_hsv(esp_random(), 255, 255);
