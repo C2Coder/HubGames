@@ -21,7 +21,6 @@
 #define COUNTDOWN_TICKS (3000 / FRAME_MS)
 #define FADE_TICKS      12
 #define MENU_BG         70 // ambient level behind menus
-#define GAME_BG         25 // ambient level behind games
 #define IDLE_TICKS      (60000 / FRAME_MS) // no input in menus -> back to the show
 #define ADMIN_HOLD      (1000 / FRAME_MS)  // hold pause on P1 to show SHOW / SETTINGS
 #define BOOT_PIN        GPIO_NUM_0         // BOOT button kicks everyone off the WiFi
@@ -434,7 +433,6 @@ static void start_game(void)
 
 static void draw_game(void)
 {
-    ambient_plasma(t, GAME_BG);
     if (per_panel()) {
         for (int k = 0; k < n_inst; k++)
             game->draw(gs[k]);

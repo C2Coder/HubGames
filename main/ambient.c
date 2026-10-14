@@ -11,18 +11,12 @@
 #define W     HUB75_W
 #define SLOT  600 // frames per effect (12 s)
 #define FADE  40  // fade in/out frames
-#define N_FX  8
-#define QN    72 // tunnel quadrant table size
+#define N_FX  5
 
 static int8_t sin8[256];        // -127..127, full circle in 256
 static uint16_t hue_pal[256];   // rgb565, full saturation and value
 static uint16_t fire_pal[256];
 static uint16_t fall_pal[256];
-static uint16_t glow_pal[256];
-static uint16_t depth_lut[256]; // tunnel depth by radius
-static uint16_t ball_lut[1024]; // metaball falloff by d2
-static uint8_t qang[QN][QN];    // angle of a quadrant, 0..64 of 256, 72 wide for the sway
-static uint8_t qrad[QN][QN];    // radius in half pixels
 static bool ready;
 static uint32_t rng_s = 2463534242u;
 
@@ -60,16 +54,7 @@ static void init_tables(void)
         fire_pal[i] = rgb565(clampi(i * 5 / 2, 0, 255), clampi((i - 90) * 2, 0, 255), clampi((i - 200) * 4, 0, 255));
         // matrix rain: dark to bright green
         fall_pal[i] = rgb565(i * i / 1020, i, i * i / 700);
-        depth_lut[i] = (uint16_t)(60000 / (i + 16));
     }
-    for (int i = 0; i < 1024; i++)
-        ball_lut[i] = (uint16_t)(300.0f * expf(-i / 14.0f));
-    for (int y = 0; y < QN; y++)
-        for (int x = 0; x < QN; x++) {
-            float dx = x + 0.5f, dy = y + 0.5f;
-            qang[y][x] = (uint8_t)lroundf(atan2f(dy, dx) * 256.0f / 6.2831853f);
-            qrad[y][x] = (uint8_t)clampi((int)lroundf(sqrtf(dx * dx + dy * dy) * 2), 0, 255);
-        }
 }
 
 // ---------------------------------------------------------------- plasma
@@ -268,39 +253,6 @@ static void fx_matrix(uint32_t t, bool fresh)
     }
 }
 
-// ---------------------------------------------------------------- tunnel
-
-static void fx_tunnel(uint32_t t)
-{
-    int h = screen_h, cy = h / 2;
-    int sway_x = (sin8[(t * 2) & 255] * 6) >> 7, sway_y = (sin8[(t * 3 + 64) & 255] * (h / 16)) >> 7;
-    int rot = t, zoom = t * 2;
-    for (int y = 0; y < h; y++) {
-        int dy = y - cy - sway_y;
-        int ay = dy >= 0 ? dy : -dy - 1;
-        ay = ay > QN - 1 ? QN - 1 : ay;
-        uint16_t *row = hub75_fb[y];
-        for (int x = 0; x < W; x++) {
-            int dx = x - 64 - sway_x;
-            int ax = dx >= 0 ? dx : -dx - 1;
-            ax = ax > QN - 1 ? QN - 1 : ax;
-            int a = qang[ay][ax];
-            int ang = dx >= 0 ? (dy >= 0 ? a : 256 - a) : (dy >= 0 ? 128 - a : 128 + a);
-            int r = qrad[ay][ax];
-            int u = depth_lut[r] + zoom;
-            int v = (ang + rot) & 255;
-            // rings along u, spokes along v, hue spirals
-            int ring = sin8[(u * 4) & 255];
-            int spoke = sin8[(v * 4) & 255];
-            int val = 140 + ((ring * spoke) >> 7) + ((ring + spoke) >> 2);
-            int hue = (u >> 2) + v + (t >> 1);
-            int center = r < 36 ? r * 7 : 255; // dark center
-            val = (clampi(val, 30, 255) * center) >> 8;
-            row[x] = shade(hue_pal[hue & 255], val);
-        }
-    }
-}
-
 // ---------------------------------------------------------------- life
 
 static void life_seed(int lw, int lh)
@@ -371,44 +323,6 @@ static void fx_life(uint32_t t, bool fresh)
             uint16_t *p = &hub75_fb[y * 2][x * 2];
             p[0] = p[1] = p[W] = p[W + 1] = col;
         }
-}
-
-// ---------------------------------------------------------------- metaballs
-
-static void fx_balls(uint32_t t)
-{
-    int h = screen_h;
-    for (int i = 0; i < 5; i++) {
-        st.ball.bx[i] = 64 + (sin8[(t * (2 + i) + i * 50) & 255] * 52 >> 7);
-        st.ball.by[i] = h / 2 + (sin8[(t * (3 + (i * 2) % 4) + i * 90 + 30) & 255] * (h / 2 - 8) >> 7);
-        for (int x = 0; x < W; x++) {
-            int d = x - st.ball.bx[i];
-            st.ball.dx2[i][x] = d * d;
-        }
-    }
-    // palette: dark glow, then colored body, white core
-    for (int i = 0; i < 256; i++) {
-        int hue = 200 + (t >> 1) - i / 2;
-        int sat = i > 210 ? 255 - (i - 210) * 5 : 255;
-        int val = i * 3 / 2;
-        glow_pal[i] = gfx_hsv(hue & 255, clampi(sat, 0, 255), clampi(val, 0, 255));
-    }
-    for (int y = 0; y < h; y++) {
-        int32_t dy2[5];
-        for (int i = 0; i < 5; i++) {
-            int d = y - st.ball.by[i];
-            dy2[i] = d * d;
-        }
-        uint16_t *row = hub75_fb[y];
-        for (int x = 0; x < W; x++) {
-            int s = 0;
-            for (int i = 0; i < 5; i++) {
-                int d2 = (st.ball.dx2[i][x] + dy2[i]) >> 4;
-                s += ball_lut[d2 > 1023 ? 1023 : d2];
-            }
-            row[x] = glow_pal[s > 255 ? 255 : s];
-        }
-    }
 }
 
 // ---------------------------------------------------------------- fireworks
@@ -483,7 +397,7 @@ static void fade_fb(int f) // f 0..256
 void ambient_show(uint32_t t)
 {
     static int cur = -1, last_h;
-    static const uint8_t order[N_FX] = {0, 5, 2, 1, 4, 6, 3, 7};
+    static const uint8_t order[N_FX] = {5, 2, 1, 3, 7};
     if (!ready) init_tables();
     int slot = (t / SLOT) % N_FX;
     uint32_t lt = t % SLOT;
@@ -491,13 +405,10 @@ void ambient_show(uint32_t t)
     cur = slot;
     last_h = screen_h;
     switch (order[slot]) {
-    case 0: plasma(t, 255, 1); break;
     case 1: fx_fire(t, fresh); break;
     case 2: fx_stars(t, fresh); break;
     case 3: fx_matrix(t, fresh); break;
-    case 4: fx_tunnel(t); break;
     case 5: fx_life(t, fresh); break;
-    case 6: fx_balls(t); break;
     default: fx_fireworks(t, fresh); break;
     }
     if (lt < FADE) fade_fb(lt * 256 / FADE);
