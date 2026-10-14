@@ -226,8 +226,7 @@ static void main_menu(void)
     if (!in[0].connected) {
         admin = false;
         ambient_show(t);
-        if (t % 750 < 500) // join info 10 s out of every 15 s
-            join_overlay();
+        join_overlay();
         return;
     }
 
@@ -389,8 +388,7 @@ static void ambient_mode(void)
     }
     admin = false;
     ambient_show(t);
-    if (t % 750 < 500) // join info 10 s out of every 15 s
-        join_overlay();
+    join_overlay();
 }
 
 // ---- games ----
