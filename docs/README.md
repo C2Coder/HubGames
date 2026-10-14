@@ -1,4 +1,4 @@
-# HubGames
+# HubGames (Mecha Arcade)
 
 Games for two daisy chained 64x64 HUB75 panels driven by an RP-HUB75 board, controlled by a Saturn (ESP32-S3) board.
 
@@ -38,9 +38,9 @@ Joystick/arrows move, A fire (and menu confirm), B use/open, pause button = Doom
 
 ## Playing
 
-Connect a phone to the open WiFi `HubGames` and open `http://192.168.4.1`. Phones get P1-P4 in connect order.
-P1 picks in the main menu: 1 PLAYER, VERSUS (own panel each), PARTY (2-4 on one shared screen), AMBIENT (attract show) or SETTINGS (2 or 4 panels, brightness, panel test).
-With nobody connected the panels run the ambient show with join info. 4 panels = 2x2, chain order in `panel_map` in `main/hub75.c`.
+Shown to visitors as **MECHA ARCADE**. Connect a phone to the open WiFi `Mecha Arcade` and open `http://192.168.4.1`. Phones get P1-P4 in connect order and show a help line for the current screen.
+P1 picks 1 PLAYER or MULTIPLAYER (per-panel games one panel per player, shared games on the whole screen). Holding the pause button on P1 for 1 s in the main menu shows SHOW (attract show) and SETTINGS (2 or 4 panels, brightness, panel test).
+With nobody connected the panels run the attract show with join instructions, menus go back to it after 60 s without input. The BOOT button on the Saturn board kicks every phone off the WiFi. 4 panels = 2x2, chain order in `panel_map` in `main/hub75.c`.
 
 ## Code
 

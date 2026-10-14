@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>HubGames</title>
+<title>Mecha Arcade</title>
 <style>
 * { box-sizing: border-box; margin: 0; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
 html, body { height: 100%; background: #111; color: #eee; font-family: sans-serif; overflow: hidden; touch-action: none; }
@@ -27,6 +27,7 @@ html, body { height: 100%; background: #111; color: #eee; font-family: sans-seri
 #fire { grid-column: 1 / 3; width: 24vh; height: 24vh; border-radius: 50%; background: #b22; color: #fff; font-size: 6vh; font-weight: bold; }
 #use { grid-column: 1 / 3; width: 30vh; height: 11vh; background: #c80; color: #fff; font-size: 5vh; }
 .turn { width: 25vh; height: 25vh; }
+#hint { position: absolute; left: 0; right: 0; bottom: 2vh; text-align: center; font-size: 5vh; color: #ccc; pointer-events: none; }
 #rot { display: none; height: 100%; align-items: center; justify-content: center; font-size: 6vw; color: #888; }
 @media (orientation: portrait) { #rot { display: flex; } #bar, #pad { display: none; } }
 </style>
@@ -34,6 +35,7 @@ html, body { height: 100%; background: #111; color: #eee; font-family: sans-seri
 <body>
 <div id="rot">Rotate your phone</div>
 <div id="bar"><div id="swap" class="t">ARROWS</div><div id="who">connecting...</div><div class="t" data-b="start">II</div></div>
+<div id="hint">Connecting to Mecha Arcade...</div>
 <div id="pad">
   <div id="left">
     <div id="joy"><div id="knob"></div></div>
@@ -62,17 +64,51 @@ function send() {
   if (ws && ws.readyState === 1) ws.send(new Int8Array([btn | (layout === 'doom' ? 128 : 0), jx, jy]));
 }
 
-function show(p) {
+// help line for what is on the panels (screen ids match net.h)
+const hint = document.getElementById('hint');
+const DOOM_CTX = 17;
+const GAME_HINTS = {
+  10: '\u25C0 \u25B6 move \u00B7 \u25BC faster \u00B7 A rotate \u00B7 B drop',
+  11: 'Steer the snake, eat the red dots',
+  12: 'Steer, eat red dots, don\'t crash into anyone',
+  13: '\u25B2 \u25BC move your paddle',
+  14: '\u25C0 \u25B6 walk \u00B7 \u25B2 \u25BC ladders \u00B7 A jump barrels',
+  15: '\u25C0 \u25B6 move \u00B7 A jump \u00B7 B run',
+  16: 'Drive \u00B7 A fire (bullets bounce off walls)',
+  17: 'Stick move \u00B7 \u25C0 \u25B6 turn \u00B7 FIRE \u00B7 USE opens doors',
+};
+let player = -1, ctx = 0;
+
+function hintText(p, c, playing) {
+  if (p < 0) return 'Connecting to Mecha Arcade...';
+  if (p === 0) return 'All player slots are taken, try again later';
+  if (c === 1) return p === 1 ? '\u25B2 \u25BC choose \u00B7 A select \u00B7 B back' : 'Player 1 picks the game';
+  if (c === 2) return 'Paused \u00B7 A resume \u00B7 B quit';
+  if (c === 3) return 'A play again \u00B7 B menu';
+  if (c === 4) return 'Press any button to start';
+  if (GAME_HINTS[c]) return playing ? GAME_HINTS[c] : 'Watching \u00B7 join the next game';
+  return '';
+}
+
+function show(p, c, playing) {
   who.textContent = p < 0 ? 'connecting...' : p === 0 ? 'full' : 'P' + p;
   who.style.color = ['#888', '#0f0', '#08f', '#fc0', '#f0f'][p < 0 ? 0 : p];
+  hint.textContent = hintText(p, c, playing);
+  // Doom gets its own layout automatically, back to the chosen one after
+  if (c !== ctx) {
+    if (c === DOOM_CTX) applyLayout('doom');
+    else if (ctx === DOOM_CTX) applyLayout(pref);
+  }
+  player = p;
+  ctx = c;
 }
 
 function connect() {
   ws = new WebSocket('ws://' + location.host + '/ws');
   ws.binaryType = 'arraybuffer';
   ws.onopen = send;
-  ws.onmessage = e => show(new Uint8Array(e.data)[0]);
-  ws.onclose = () => { show(-1); setTimeout(connect, 1000); };
+  ws.onmessage = e => { const d = new Uint8Array(e.data); show(d[0], d[1] || 0, d[2] || 0); };
+  ws.onclose = () => { show(-1, 0, 0); setTimeout(connect, 1000); };
 }
 connect();
 setInterval(send, 100);
@@ -118,23 +154,30 @@ joy.addEventListener('pointerup', jend);
 joy.addEventListener('pointercancel', jend);
 
 // layout: joystick, arrows, or doom (stick moves + strafes, arrows turn, fire),
-// remembered per phone
+// the chosen one (pref) is remembered per phone
 const LAYOUTS = ['stick', 'arrows', 'doom'];
 const swap = document.getElementById('swap'), dpad = document.getElementById('dpad');
 const ab = document.getElementById('ab'), doompad = document.getElementById('doompad');
-
-function setLayout(l) {
+let pref = 'stick';
+function applyLayout(l) {
   layout = l;
   joy.classList.toggle('hide', l === 'arrows');
   dpad.classList.toggle('hide', l !== 'arrows');
   ab.classList.toggle('hide', l === 'doom');
   doompad.classList.toggle('hide', l !== 'doom');
   swap.textContent = l.toUpperCase();
-  try { localStorage.setItem('layout', l); } catch (e) {}
 }
-try { layout = localStorage.getItem('layout') || (localStorage.getItem('arrows') ? 'arrows' : 'stick'); } catch (e) {}
-setLayout(LAYOUTS.includes(layout) ? layout : 'stick');
-swap.addEventListener('click', () => setLayout(LAYOUTS[(LAYOUTS.indexOf(layout) + 1) % LAYOUTS.length]));
+try { pref = localStorage.getItem('layout') || 'stick'; } catch (e) {}
+if (!LAYOUTS.includes(pref) || pref === 'doom') pref = 'stick';
+applyLayout(pref);
+swap.addEventListener('click', () => {
+  const l = LAYOUTS[(LAYOUTS.indexOf(layout) + 1) % LAYOUTS.length];
+  applyLayout(l);
+  if (l !== 'doom') {
+    pref = l;
+    try { localStorage.setItem('layout', l); } catch (e) {}
+  }
+});
 </script>
 </body>
 </html>

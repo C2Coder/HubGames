@@ -12,7 +12,7 @@
 #include "freertos/FreeRTOS.h"
 #include "nvs_flash.h"
 
-#define SSID       "HubGames"
+#define SSID       "Mecha Arcade"
 #define DEADZONE   40
 #define TIMEOUT_MS 2000
 
@@ -30,6 +30,32 @@ typedef struct {
 
 static slot_t slots[MAX_PLAYERS] = {{.fd = -1}, {.fd = -1}, {.fd = -1}, {.fd = -1}};
 static portMUX_TYPE lock = portMUX_INITIALIZER_UNLOCKED;
+static httpd_handle_t server;
+static uint8_t screen_ctx, playing_mask;
+
+void net_set_context(uint8_t ctx, uint8_t playing)
+{
+    portENTER_CRITICAL(&lock);
+    screen_ctx = ctx;
+    playing_mask = playing;
+    portEXIT_CRITICAL(&lock);
+}
+
+void net_kick_all(void)
+{
+    int fds[MAX_PLAYERS], n = 0;
+    portENTER_CRITICAL(&lock);
+    for (int i = 0; i < MAX_PLAYERS; i++)
+        if (slots[i].fd >= 0) {
+            fds[n++] = slots[i].fd;
+            slots[i].fd = -1;
+        }
+    portEXIT_CRITICAL(&lock);
+    for (int i = 0; i < n; i++)
+        httpd_sess_trigger_close(server, fds[i]);
+    esp_wifi_deauth_sta(0); // 0 = all stations
+    ESP_LOGI(TAG, "kicked everyone");
+}
 
 void input_get(int p, input_t *in)
 {
@@ -65,7 +91,7 @@ void input_get(int p, input_t *in)
     prev[p] = b;
 }
 
-// Frame from the page: [buttons, jx, jy], reply: [player number, 0 = full]
+// Frame from the page: [buttons, jx, jy], reply: [player number (0 = full), screen ctx, playing]
 static esp_err_t ws_handler(httpd_req_t *req)
 {
     if (req->method == HTTP_GET)
@@ -97,10 +123,10 @@ static esp_err_t ws_handler(httpd_req_t *req)
             .seen = xTaskGetTickCount(),
         };
     }
+    uint8_t reply[3] = {p + 1, screen_ctx, p >= 0 && ((playing_mask >> p) & 1)};
     portEXIT_CRITICAL(&lock);
 
-    uint8_t reply = p + 1;
-    httpd_ws_frame_t out = {.type = HTTPD_WS_TYPE_BINARY, .payload = &reply, .len = 1};
+    httpd_ws_frame_t out = {.type = HTTPD_WS_TYPE_BINARY, .payload = reply, .len = sizeof(reply)};
     return httpd_ws_send_frame(req, &out);
 }
 
@@ -148,7 +174,6 @@ void net_init(void)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wc));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    httpd_handle_t server;
     httpd_config_t hc = HTTPD_DEFAULT_CONFIG();
     hc.close_fn = on_close;
     hc.lru_purge_enable = true;

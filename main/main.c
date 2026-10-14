@@ -5,6 +5,7 @@
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "driver/gpio.h"
 
 #include "ambient.h"
 #include "doom.h"
@@ -21,29 +22,35 @@
 #define FADE_TICKS      12
 #define MENU_BG         70 // ambient level behind menus
 #define GAME_BG         25 // ambient level behind games
+#define IDLE_TICKS      (60000 / FRAME_MS) // no input in menus -> back to the show
+#define ADMIN_HOLD      (1000 / FRAME_MS)  // hold pause on P1 to show SHOW / SETTINGS
+#define BOOT_PIN        GPIO_NUM_0         // BOOT button kicks everyone off the WiFi
 
 const uint16_t player_color[MAX_PLAYERS] = {C_GREEN, C_BLUE, C_YELLOW, C_PINK};
 
-enum { MODE_SINGLE, MODE_VS, MODE_PARTY };
-enum { M_SINGLE = 1 << MODE_SINGLE, M_VS = 1 << MODE_VS, M_PARTY = 1 << MODE_PARTY };
+// MULTIPLAYER runs per-panel games one panel per player, shared games on the whole screen
+enum { MODE_SINGLE, MODE_MULTI };
+enum { M_SINGLE = 1 << MODE_SINGLE, M_MULTI = 1 << MODE_MULTI };
 
-// main menu, the first three are game modes
-enum { MAIN_SINGLE, MAIN_VS, MAIN_PARTY, MAIN_AMBIENT, MAIN_SETTINGS, MAIN_N };
-static const char *const main_items[MAIN_N] = {"1 PLAYER", "VERSUS", "PARTY", "AMBIENT", "SETTINGS"};
+// main menu, SHOW and SETTINGS only after holding pause on P1
+enum { MAIN_SINGLE, MAIN_MULTI, MAIN_SHOW, MAIN_SETTINGS, MAIN_N };
+#define MAIN_VISITOR 2
+static const char *const main_items[MAIN_N] = {"1 PLAYER", "MULTIPLAYER", "SHOW", "SETTINGS"};
 
 static const struct {
     const char *name;
     const game_t *game;
     uint8_t modes;
+    uint8_t ctx; // what the phones show as help
 } menu[] = {
-    {"TETRIS", &game_tetris, M_SINGLE | M_VS},
-    {"SNAKE", &game_snake, M_SINGLE | M_VS},
-    {"SNAKE ARENA", &game_snake_arena, M_VS | M_PARTY},
-    {"PONG", &game_pong, M_SINGLE | M_VS | M_PARTY},
-    {"DONKEY KONG", &game_dk, M_SINGLE | M_VS},
-    {"MARIO", &game_mario, M_SINGLE | M_VS},
-    {"TANKS", &game_tanks, M_SINGLE | M_VS | M_PARTY},
-    {"DOOM", NULL, M_SINGLE}, // special, see games_menu
+    {"TETRIS", &game_tetris, M_SINGLE | M_MULTI, CTX_TETRIS},
+    {"SNAKE", &game_snake, M_SINGLE | M_MULTI, CTX_SNAKE},
+    {"SNAKE ARENA", &game_snake_arena, M_MULTI, CTX_ARENA},
+    {"PONG", &game_pong, M_SINGLE | M_MULTI, CTX_PONG},
+    {"DONKEY KONG", &game_dk, M_SINGLE | M_MULTI, CTX_DK},
+    {"MARIO", &game_mario, M_SINGLE | M_MULTI, CTX_MARIO},
+    {"TANKS", &game_tanks, M_SINGLE | M_MULTI, CTX_TANKS},
+    {"DOOM", NULL, M_SINGLE, CTX_DOOM}, // special, see games_menu
 };
 #define MENU_N (int)(sizeof(menu) / sizeof(menu[0]))
 
@@ -54,6 +61,8 @@ enum { S_MAIN, S_GAMES, S_COUNTDOWN, S_PLAY, S_PAUSE, S_RESULT, S_AMBIENT, S_SET
 static uint32_t t; // frame counter
 static int state = S_MAIN, fade, timer;
 static int main_sel, mode, game_sel = 1, set_sel;
+static int idle_t, admin_hold;
+static bool admin; // SHOW and SETTINGS visible
 static int bar_y = -1; // animated selection bar, 1/8 px
 static const game_t *game;
 static uint8_t players; // mask of players in the running game
@@ -180,36 +189,62 @@ static void draw_players_row(int y)
     }
 }
 
-// rainbow HUBGAMES and how to join, over the ambient show
+static void rainbow_text(int y, int scale, const char *s)
+{
+    int x = 64 - gfx_text_width(scale, s) / 2;
+    for (int i = 0; s[i]; i++) {
+        char ch[2] = {s[i], 0};
+        gfx_text(x + i * 4 * scale, y, scale, gfx_hsv(t * 3 + i * 24, 220, 255), ch);
+    }
+}
+
+// MECHA ARCADE and how to join, over the darkened ambient show
 static void join_overlay(void)
 {
-    int big = screen_h == 128 ? 3 : 2;
-    int cy = screen_h / 2;
-    gfx_darken(0, cy - 15 - big * 5, HUB75_W, 34 + big * 5);
-    const char *title = "HUBGAMES";
-    int x = 64 - gfx_text_width(big, title) / 2;
-    for (int i = 0; title[i]; i++) {
-        char ch[2] = {title[i], 0};
-        gfx_text(x + i * 4 * big, cy - 12 - big * 5, big, gfx_hsv(t * 3 + i * 24, 220, 255), ch);
+    uint16_t blink = (t / 25) % 2 ? C_YELLOW : C_WHITE;
+    gfx_darken(0, 0, HUB75_W, screen_h);
+    if (screen_h == 128) {
+        rainbow_text(4, 3, "MECHA");
+        rainbow_text(22, 3, "ARCADE");
+        gfx_text_center(64, 46, 2, C_GRAY, "1. JOIN WIFI");
+        gfx_text_center(64, 58, 2, C_YELLOW, "MECHA ARCADE");
+        gfx_text_center(64, 78, 2, C_GRAY, "2. OPEN");
+        gfx_text_center(64, 90, 2, blink, "192.168.4.1");
+        gfx_text_center(64, 112, 1, C_WHITE, "THEN PLAY ON YOUR PHONE");
+    } else {
+        rainbow_text(2, 2, "MECHA ARCADE");
+        gfx_text_center(64, 17, 1, C_GRAY, "1. JOIN WIFI");
+        gfx_text_center(64, 24, 1, C_YELLOW, "MECHA ARCADE");
+        gfx_text_center(64, 34, 1, C_GRAY, "2. OPEN");
+        gfx_text_center(64, 41, 2, blink, "192.168.4.1");
+        gfx_text_center(64, 57, 1, C_WHITE, "THEN PLAY ON YOUR PHONE");
     }
-    gfx_text_center(64, cy + 2, 1, C_WHITE, "JOIN WIFI HUBGAMES");
-    gfx_text_center(64, cy + 10, 1, (t / 25) % 2 ? C_YELLOW : C_WHITE, "OPEN 192.168.4.1");
 }
 
 static void main_menu(void)
 {
     if (!in[0].connected) {
+        admin = false;
         ambient_show(t);
-        join_overlay();
+        if (t % 750 < 500) // join info 10 s out of every 15 s
+            join_overlay();
         return;
     }
 
+    // hold pause on P1 for the hidden items
+    admin_hold = (in[0].held & BTN_START) ? admin_hold + 1 : 0;
+    if (admin_hold == ADMIN_HOLD)
+        admin = !admin;
+    int n = admin ? MAIN_N : MAIN_VISITOR;
+    if (main_sel >= n)
+        main_sel = 0;
+
     if (in[0].pressed & BTN_UP)
-        main_sel = (main_sel + MAIN_N - 1) % MAIN_N;
+        main_sel = (main_sel + n - 1) % n;
     if (in[0].pressed & BTN_DOWN)
-        main_sel = (main_sel + 1) % MAIN_N;
+        main_sel = (main_sel + 1) % n;
     if (in[0].pressed & BTN_A) {
-        if (main_sel == MAIN_AMBIENT) {
+        if (main_sel == MAIN_SHOW) {
             set_state(S_AMBIENT);
         } else if (main_sel == MAIN_SETTINGS) {
             set_state(S_SETTINGS);
@@ -225,7 +260,8 @@ static void main_menu(void)
 
     ambient_plasma(t, MENU_BG);
     int scale = text_scale();
-    draw_list(main_items, MAIN_N, main_sel, scale == 2 ? 20 : 6);
+    rainbow_text(scale == 2 ? 4 : 1, scale, "MECHA ARCADE");
+    draw_list(main_items, n, main_sel, scale == 2 ? 30 : 14);
     draw_players_row(screen_h - 6 * scale);
 }
 
@@ -250,6 +286,7 @@ static void games_menu(void)
     bool doom = !menu[game_sel].game;
     if ((in[0].pressed & BTN_A) && doom && doom_available()) {
         state = S_DOOM;
+        net_set_context(CTX_DOOM, 0x1);
         doom_run();
         return;
     }
@@ -280,7 +317,7 @@ static void games_menu(void)
         gfx_text_center(64, y, scale, C_GRAY, doom_available() ? "START = DOOM MENU" : "NO WAD FLASHED");
     } else if (!ready) {
         gfx_text_center(64, y, scale, C_YELLOW, "NEED 2+ PLAYERS");
-    } else if (mode != MODE_SINGLE) {
+    } else if (mode == MODE_MULTI) {
         int max = menu[game_sel].game->shared ? MAX_PLAYERS : hub75_panels;
         snprintf(buf, sizeof(buf), "%d PLAYERS", n < max ? n : max);
         gfx_text_center(64, y, scale, C_GRAY, buf);
@@ -350,8 +387,9 @@ static void ambient_mode(void)
         set_state(S_MAIN);
         return;
     }
+    admin = false;
     ambient_show(t);
-    if (t % 750 < 250) // join info 5 s out of every 15 s
+    if (t % 750 < 500) // join info 10 s out of every 15 s
         join_overlay();
 }
 
@@ -607,18 +645,61 @@ static void result_screen(void)
     }
 }
 
+// what the phones show as help for the current screen
+static uint8_t screen_ctx(void)
+{
+    switch (state) {
+    case S_MAIN: return in[0].connected ? CTX_MENU : CTX_SHOW;
+    case S_COUNTDOWN:
+    case S_PLAY: return menu[game_sel].ctx;
+    case S_PAUSE: return CTX_PAUSE;
+    case S_RESULT: return CTX_RESULT;
+    case S_AMBIENT: return CTX_SHOW;
+    case S_DOOM: return CTX_DOOM;
+    default: return CTX_MENU;
+    }
+}
+
+// BOOT button: kick every phone off the WiFi and start over
+static void boot_button(void)
+{
+    static int last = 1;
+    int level = gpio_get_level(BOOT_PIN);
+    if (last && !level) {
+        net_kick_all();
+        if (state != S_DOOM)
+            set_state(S_MAIN);
+    }
+    last = level;
+}
+
+// no input in menus for a while -> back to the attract show
+static void idle_return(void)
+{
+    if (pressed_any(0xf))
+        idle_t = 0;
+    bool menu_like = state == S_GAMES || state == S_SETTINGS || state == S_PANELTEST || state == S_RESULT ||
+                     state == S_PAUSE || (state == S_MAIN && in[0].connected);
+    if (menu_like && ++idle_t > IDLE_TICKS) {
+        idle_t = 0;
+        set_state(S_AMBIENT);
+    }
+}
+
 static void game_task(void *arg)
 {
     TickType_t last = xTaskGetTickCount();
     int64_t worst = 0;
     while (1) {
         int64_t start = esp_timer_get_time();
+        boot_button();
         if (state == S_DOOM) { // Doom draws from its own task
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
         for (int p = 0; p < MAX_PLAYERS; p++)
             input_get(p, &in[p]);
+        idle_return();
         gfx_clear();
 
         switch (state) {
@@ -633,6 +714,8 @@ static void game_task(void *arg)
         case S_PANELTEST: panel_test(); break;
         }
         fx_update_draw();
+        bool in_game = state == S_COUNTDOWN || state == S_PLAY || state == S_PAUSE || state == S_RESULT;
+        net_set_context(screen_ctx(), in_game ? players : 0xf);
 
         if (fade < FADE_TICKS)
             fade++;
@@ -653,6 +736,8 @@ static void game_task(void *arg)
 void app_main(void)
 {
     hub75_init();
+    gpio_config_t boot = {.pin_bit_mask = 1ULL << BOOT_PIN, .mode = GPIO_MODE_INPUT, .pull_up_en = GPIO_PULLUP_ENABLE};
+    gpio_config(&boot);
     net_init();
     settings_load();
     hub75_set_panels(set_panels);
