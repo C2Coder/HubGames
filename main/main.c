@@ -213,7 +213,6 @@ static void rainbow_text(int y, int scale, const char *s)
 // MECHA ARCADE and how to join, over the darkened ambient show
 static void join_overlay(void)
 {
-    uint16_t blink = (t / 25) % 2 ? C_YELLOW : C_WHITE;
     gfx_darken(0, 0, HUB75_W, screen_h);
     if (screen_h == 128) {
         rainbow_text(4, 3, "MECHA");
@@ -221,14 +220,14 @@ static void join_overlay(void)
         gfx_text_center(64, 46, 2, C_GRAY, "1. JOIN WIFI");
         gfx_text_center(64, 58, 2, C_YELLOW, "MECHA ARCADE");
         gfx_text_center(64, 78, 2, C_GRAY, "2. OPEN");
-        gfx_text_center(64, 90, 2, blink, "192.168.4.1");
+        gfx_text_center(64, 90, 2, C_WHITE, "192.168.4.1");
         gfx_text_center(64, 112, 1, C_WHITE, "THEN PLAY ON YOUR PHONE");
     } else {
         rainbow_text(2, 2, "MECHA ARCADE");
         gfx_text_center(64, 17, 1, C_GRAY, "1. JOIN WIFI");
         gfx_text_center(64, 24, 1, C_YELLOW, "MECHA ARCADE");
         gfx_text_center(64, 34, 1, C_GRAY, "2. OPEN");
-        gfx_text_center(64, 41, 2, blink, "192.168.4.1");
+        gfx_text_center(64, 41, 2, C_WHITE, "192.168.4.1");
         gfx_text_center(64, 57, 1, C_WHITE, "THEN PLAY ON YOUR PHONE");
     }
 }
