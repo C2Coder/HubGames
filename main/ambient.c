@@ -1,4 +1,4 @@
-// Background animations: dim plasma behind menus/games and the attract show.
+// Attract show animations.
 // Integer math and lookup tables per pixel, tables are built on first use.
 #include "ambient.h"
 
@@ -12,6 +12,8 @@
 #define SLOT  600 // frames per effect (12 s)
 #define FADE  40  // fade in/out frames
 #define N_FX  5
+
+_Static_assert(AMBIENT_CYCLE == SLOT * N_FX, "update AMBIENT_CYCLE");
 
 static int8_t sin8[256];        // -127..127, full circle in 256
 static uint16_t hue_pal[256];   // rgb565, full saturation and value
@@ -57,64 +59,6 @@ static void init_tables(void)
     }
 }
 
-// ---------------------------------------------------------------- plasma
-
-static const uint8_t bayer[4][4] = {
-    {0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5},
-};
-
-// mode 0: calm and dim-friendly, mode 1: show (faster, full color range)
-static void plasma(uint32_t t, uint8_t level, int mode)
-{
-    int h = screen_h;
-    int ts = mode ? t : t / 2;
-    uint16_t pal[256][3]; // 8.8 fixed point per channel, already scaled by level
-    int p1 = ts / 3, p2 = 85 + ts / 4, p3 = 170 + ts / 5;
-    for (int i = 0; i < 256; i++) {
-        int r, g, b;
-        if (mode) {
-            r = 128 + sin8[(i + p1) & 255]; // 1..255
-            g = 128 + sin8[(i + p2) & 255];
-            b = 128 + sin8[(i + p3) & 255];
-        } else { // soft colors with a floor so they don't go black
-            r = 60 + ((sin8[(i + p1) & 255] * 90) >> 7) + 90;
-            g = 60 + ((sin8[(i + p2) & 255] * 90) >> 7) + 90;
-            b = 60 + ((sin8[(i + p3) & 255] * 90) >> 7) + 90;
-        }
-        pal[i][0] = r * level;
-        pal[i][1] = g * level;
-        pal[i][2] = b * level;
-    }
-    int8_t ax[W], bx[W];
-    for (int x = 0; x < W; x++) {
-        ax[x] = sin8[(x * 5 + ts * 2) & 255];
-        bx[x] = sin8[(x * 3 - ts) & 255];
-    }
-    int cx = mode ? 4 : 3;
-    for (int y = 0; y < h; y++) {
-        int by = sin8[(y * 6 + ts) & 255];
-        int cy = sin8[(y * 4 + ts * 3 / 2) & 255];
-        uint16_t *row = hub75_fb[y];
-        for (int x = 0; x < W; x++) {
-            int d = sin8[((x + y) * cx + ts * 2 + 64) & 255];
-            int idx = (ax[x] + by + bx[x] / 2 + cy / 2 + d) >> 1;
-            const uint16_t *p = pal[idx & 255];
-            int dz = bayer[y & 3][x & 3]; // ordered dither keeps low levels smooth
-            int r = (p[0] + dz * 128) >> 11, g = (p[1] + dz * 64) >> 10, b = (p[2] + dz * 128) >> 11;
-            r -= r >> 5;
-            g -= g >> 6;
-            b -= b >> 5;
-            row[x] = (r << 11) | (g << 5) | b;
-        }
-    }
-}
-
-void ambient_plasma(uint32_t t, uint8_t level)
-{
-    if (!ready) init_tables();
-    plasma(t, level, 0);
-}
-
 // ---------------------------------------------------------------- state shared by the show effects
 
 typedef struct { int16_t x, y, z; uint8_t hue; } star_t;
@@ -137,10 +81,6 @@ static union {
         uint8_t hue[LIFE_H][LIFE_W];
         int cur, hist[8], hn;
     } life;
-    struct {
-        int32_t dx2[5][W];
-        int bx[5], by[5];
-    } ball;
     struct {
         spark_t p[N_SPARKS];
         int next;
@@ -394,9 +334,15 @@ static void fade_fb(int f) // f 0..256
     }
 }
 
+static int cur = -1, last_h;
+
+void ambient_reset(void)
+{
+    cur = -1;
+}
+
 void ambient_show(uint32_t t)
 {
-    static int cur = -1, last_h;
     static const uint8_t order[N_FX] = {5, 2, 1, 3, 7};
     if (!ready) init_tables();
     int slot = (t / SLOT) % N_FX;

@@ -1,10 +1,12 @@
-// Background animations: dim plasma behind menus/games and the attract show.
+// Attract show animations.
 #pragma once
 
 #include <stdint.h>
 
-// full screen plasma, level = brightness 0..255, t = frame counter
-void ambient_plasma(uint32_t t, uint8_t level);
+#define AMBIENT_CYCLE (5 * 600) // frames until every animation was shown once
 
 // attract show: cycles through animations, full screen, t = frame counter
 void ambient_show(uint32_t t);
+
+// start the next ambient_show from scratch (t may jump)
+void ambient_reset(void);

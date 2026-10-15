@@ -39,7 +39,7 @@ Joystick/arrows move, A fire (and menu confirm), B use/open, pause button = Doom
 ## Playing
 
 Shown to visitors as **MECHA ARCADE**. Connect a phone to the open WiFi `Mecha Arcade` and open `http://192.168.4.1`. Phones get P1-P4 in connect order and show a help line for the current screen.
-P1 picks 1 PLAYER or MULTIPLAYER (per-panel games one panel per player, shared games on the whole screen). Holding the pause button on P1 for 1 s in the main menu shows SHOW (attract show) and SETTINGS (2 or 4 panels, brightness, panel test).
+P1 picks 1 PLAYER or MULTIPLAYER (per-panel games one panel per player, shared games on the whole screen). Holding the pause button on P1 for 1 s in the main menu shows SHOW (pick what the attract show plays: MIX, ANIMATIONS, or PONG / TETRIS / PACMAN playing themselves, saved in NVS) and SETTINGS (2 or 4 panels, brightness, panel test).
 With nobody connected the panels run the attract show with join instructions, menus go back to it after 60 s without input. The BOOT button on the Saturn board kicks every phone off the WiFi. 4 panels = 2x2, chain order in `panel_map` in `main/hub75.c`.
 
 ## Code
@@ -47,7 +47,7 @@ With nobody connected the panels run the attract show with join instructions, me
 - `main/main.c` - game loop (20 ms), menus, pause, results
 - `main/net.c` - WiFi AP, HTTP page, WebSocket input, player slots
 - `main/gfx.c` - drawing + 3x5 font into `hub75_fb[y][x]` (RGB565), sent by `hub75_show()`
-- `main/fx.c` - particles, `main/ambient.c` - plasma and attract show, `main/settings.c` - NVS settings
+- `main/fx.c` - particles, `main/ambient.c` - attract show animations, `main/settings.c` - NVS settings
 - `main/games/` - games implementing `game_t` from `game.h`
 - `main/web/index.html` - controller page
 

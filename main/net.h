@@ -16,6 +16,7 @@ enum {
     CTX_MARIO,
     CTX_TANKS,
     CTX_DOOM,
+    CTX_PACMAN,
 };
 
 // Open WiFi AP "Mecha Arcade", controller page at http://192.168.4.1

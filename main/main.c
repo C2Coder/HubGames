@@ -20,10 +20,10 @@
 #define FRAME_MS        20
 #define COUNTDOWN_TICKS (3000 / FRAME_MS)
 #define FADE_TICKS      12
-#define MENU_BG         70 // ambient level behind menus
 #define IDLE_TICKS      (60000 / FRAME_MS) // no input in menus -> back to the show
 #define ADMIN_HOLD      (1000 / FRAME_MS)  // hold pause on P1 to show SHOW / SETTINGS
 #define BOOT_PIN        GPIO_NUM_0         // BOOT button kicks everyone off the WiFi
+#define DEMO_TICKS      (90000 / FRAME_MS) // a demo game in the show ends after this or at game over
 
 const uint16_t player_color[MAX_PLAYERS] = {C_GREEN, C_BLUE, C_YELLOW, C_PINK};
 
@@ -49,17 +49,23 @@ static const struct {
     {"DONKEY KONG", &game_dk, M_SINGLE | M_MULTI, CTX_DK},
     {"MARIO", &game_mario, M_SINGLE | M_MULTI, CTX_MARIO},
     {"TANKS", &game_tanks, M_SINGLE | M_MULTI, CTX_TANKS},
+    {"PACMAN", &game_pacman, M_SINGLE | M_MULTI, CTX_PACMAN},
     {"DOOM", NULL, M_SINGLE, CTX_DOOM}, // special, see games_menu
 };
 #define MENU_N (int)(sizeof(menu) / sizeof(menu[0]))
 
 enum { SET_PANELS, SET_BRIGHT, SET_TEST, SET_N };
 
-enum { S_MAIN, S_GAMES, S_COUNTDOWN, S_PLAY, S_PAUSE, S_RESULT, S_AMBIENT, S_SETTINGS, S_PANELTEST, S_DOOM };
+// attract show: animations and games playing themselves, MIX goes through all
+enum { SHOW_MIX, SHOW_ANIM, SHOW_PONG, SHOW_TETRIS, SHOW_PACMAN, SHOW_N };
+static const char *const show_items[SHOW_N] = {"MIX", "ANIMATIONS", "PONG", "TETRIS", "PACMAN"};
+static const game_t *const show_game[SHOW_N] = {NULL, NULL, &game_pong, &game_tetris, &game_pacman};
+
+enum { S_MAIN, S_GAMES, S_COUNTDOWN, S_PLAY, S_PAUSE, S_RESULT, S_AMBIENT, S_SETTINGS, S_PANELTEST, S_DOOM, S_SHOWMENU };
 
 static uint32_t t; // frame counter
 static int state = S_MAIN, fade, timer;
-static int main_sel, mode, game_sel = 1, set_sel;
+static int main_sel, mode, game_sel = 1, set_sel, show_sel;
 static int idle_t, admin_hold;
 static bool admin; // SHOW and SETTINGS visible
 static int bar_y = -1; // animated selection bar, 1/8 px
@@ -76,7 +82,13 @@ static bool over[MAX_PLAYERS];
 static EXT_RAM_BSS_ATTR uint8_t gs[MAX_PLAYERS][GAME_STATE_MAX] __attribute__((aligned(4)));
 static input_t in[MAX_PLAYERS];
 
+static int show_cur;               // what the show plays now, SHOW_ANIM..
+static uint32_t show_t, show_last; // frames since show_cur started, t of the last show frame
+static bool demo_scaled;
+static EXT_RAM_BSS_ATTR uint8_t demo_gs[GAME_STATE_MAX] __attribute__((aligned(4)));
+
 static void start_game(void);
+static void show_frame(void);
 
 static void set_state(int s)
 {
@@ -224,8 +236,7 @@ static void main_menu(void)
 {
     if (!in[0].connected) {
         admin = false;
-        ambient_show(t);
-        join_overlay();
+        show_frame();
         return;
     }
 
@@ -243,7 +254,8 @@ static void main_menu(void)
         main_sel = (main_sel + 1) % n;
     if (in[0].pressed & BTN_A) {
         if (main_sel == MAIN_SHOW) {
-            set_state(S_AMBIENT);
+            show_sel = set_show;
+            set_state(S_SHOWMENU);
         } else if (main_sel == MAIN_SETTINGS) {
             set_state(S_SETTINGS);
         } else {
@@ -256,7 +268,6 @@ static void main_menu(void)
         return;
     }
 
-    ambient_plasma(t, MENU_BG);
     int scale = text_scale();
     rainbow_text(scale == 2 ? 4 : 1, scale, "MECHA ARCADE");
     draw_list(main_items, n, main_sel, scale == 2 ? 30 : 14);
@@ -305,7 +316,6 @@ static void games_menu(void)
     }
 
     int scale = text_scale();
-    ambient_plasma(t, MENU_BG);
     gfx_text_center(64, scale, scale, C_GRAY, main_items[mode]);
     draw_list(items, cnt, sel, scale == 2 ? 20 : 9);
 
@@ -355,7 +365,6 @@ static void settings_menu(void)
     const char *items[SET_N] = {panels, bright, "PANEL TEST"};
 
     int scale = text_scale();
-    ambient_plasma(t, MENU_BG);
     gfx_text_center(64, scale, scale, C_GRAY, "SETTINGS");
     draw_list(items, SET_N, set_sel, scale == 2 ? 30 : 16);
 }
@@ -379,15 +388,90 @@ static void panel_test(void)
     }
 }
 
+// small join hint over the demo games, 5 s out of every 15 s
+static void join_strip(void)
+{
+    if ((show_t / 250) % 3 != 2)
+        return;
+    gfx_darken(0, screen_h - 8, HUB75_W, 8);
+    gfx_text_center(64, screen_h - 6, 1, C_YELLOW, (show_t / 125) % 2 ? "OPEN 192.168.4.1" : "WIFI MECHA ARCADE");
+}
+
+static void show_start(int item)
+{
+    show_cur = item;
+    show_t = 0;
+    fade = 0;
+    ambient_reset();
+    fx_clear();
+    fx_scale = 1;
+    const game_t *g = show_game[item];
+    if (!g)
+        return;
+    view_t v = {0, 0, HUB75_W, screen_h};
+    demo_scaled = screen_h == 128 && g->big == BIG_SCALE2;
+    if (demo_scaled) {
+        v = (view_t){0, 0, 64, 64};
+        fx_scale = 2;
+    }
+    g->init(demo_gs, v, 0, false);
+}
+
+// one frame of the attract show, starts over when it didn't run last frame
+static void show_frame(void)
+{
+    if (show_last + 1 != t)
+        show_start(set_show == SHOW_MIX ? SHOW_ANIM : set_show);
+    show_last = t;
+
+    const game_t *g = show_game[show_cur];
+    bool done;
+    if (!g) {
+        ambient_show(show_t);
+        join_overlay();
+        done = set_show == SHOW_MIX && show_t + 1 >= AMBIENT_CYCLE;
+    } else {
+        done = g->update(demo_gs, in) != GAME_RUNNING || show_t >= DEMO_TICKS;
+        g->draw(demo_gs);
+        if (demo_scaled)
+            gfx_scale2();
+        join_strip();
+    }
+    show_t++;
+    if (done)
+        show_start(set_show != SHOW_MIX ? set_show : show_cur + 1 < SHOW_N ? show_cur + 1 : SHOW_ANIM);
+}
+
 static void ambient_mode(void)
 {
     if (pressed_any(0xf)) {
+        fx_clear();
         set_state(S_MAIN);
         return;
     }
     admin = false;
-    ambient_show(t);
-    join_overlay();
+    show_frame();
+}
+
+static void show_menu(void)
+{
+    if (in[0].pressed & BTN_UP)
+        show_sel = (show_sel + SHOW_N - 1) % SHOW_N;
+    if (in[0].pressed & BTN_DOWN)
+        show_sel = (show_sel + 1) % SHOW_N;
+    if (in[0].pressed & BTN_B) {
+        set_state(S_MAIN);
+        return;
+    }
+    if (in[0].pressed & BTN_A) {
+        set_show = show_sel;
+        settings_save();
+        set_state(S_AMBIENT);
+        return;
+    }
+    int scale = text_scale();
+    gfx_text_center(64, scale, scale, C_GRAY, "SHOW");
+    draw_list(show_items, SHOW_N, show_sel, scale == 2 ? 20 : 9);
 }
 
 // ---- games ----
@@ -585,7 +669,6 @@ static void result_screen(void)
 
     if (mode == MODE_SINGLE) {
         if (won) {
-            ambient_plasma(t, MENU_BG);
             region_band(0, -18, 34);
             region_text(0, -15, big, C_GREEN, "YOU WIN");
         } else {
@@ -595,7 +678,6 @@ static void result_screen(void)
         snprintf(buf, sizeof(buf), "SCORE %d", game->score(gs[0]));
         region_text(0, 5 * big - 8, 1, C_WHITE, buf);
     } else if (per_panel()) {
-        ambient_plasma(t, MENU_BG);
         for (int k = 0; k < n_inst; k++) {
             int p = inst_player[k];
             view_t v = region(k);
@@ -610,7 +692,6 @@ static void result_screen(void)
             region_text(k, 2, 1, player_color[p], buf);
         }
     } else {
-        ambient_plasma(t, MENU_BG);
         int cy = screen_h / 2;
         gfx_darken(0, cy - 22, HUB75_W, 34);
         if (winners == 0) {
@@ -674,7 +755,7 @@ static void idle_return(void)
 {
     if (pressed_any(0xf))
         idle_t = 0;
-    bool menu_like = state == S_GAMES || state == S_SETTINGS || state == S_PANELTEST || state == S_RESULT ||
+    bool menu_like = state == S_GAMES || state == S_SETTINGS || state == S_SHOWMENU || state == S_PANELTEST || state == S_RESULT ||
                      state == S_PAUSE || (state == S_MAIN && in[0].connected);
     if (menu_like && ++idle_t > IDLE_TICKS) {
         idle_t = 0;
@@ -708,6 +789,7 @@ static void game_task(void *arg)
         case S_AMBIENT: ambient_mode(); break;
         case S_SETTINGS: settings_menu(); break;
         case S_PANELTEST: panel_test(); break;
+        case S_SHOWMENU: show_menu(); break;
         }
         fx_update_draw();
         bool in_game = state == S_COUNTDOWN || state == S_PLAY || state == S_PAUSE || state == S_RESULT;
@@ -736,6 +818,8 @@ void app_main(void)
     gpio_config(&boot);
     net_init();
     settings_load();
+    if (set_show >= SHOW_N)
+        set_show = SHOW_MIX;
     hub75_set_panels(set_panels);
     xTaskCreatePinnedToCore(game_task, "game", 8192, NULL, 5, NULL, 1);
 }

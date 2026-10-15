@@ -4,6 +4,7 @@
 
 uint8_t set_panels = 2;
 uint8_t set_brightness = 128;
+uint8_t set_show = 0;
 
 void settings_load(void)
 {
@@ -12,6 +13,7 @@ void settings_load(void)
         return;
     nvs_get_u8(h, "panels", &set_panels);
     nvs_get_u8(h, "bright", &set_brightness);
+    nvs_get_u8(h, "show", &set_show);
     nvs_close(h);
     if (set_panels != 4)
         set_panels = 2;
@@ -26,6 +28,7 @@ void settings_save(void)
         return;
     nvs_set_u8(h, "panels", set_panels);
     nvs_set_u8(h, "bright", set_brightness);
+    nvs_set_u8(h, "show", set_show);
     nvs_commit(h);
     nvs_close(h);
 }

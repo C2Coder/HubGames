@@ -11,8 +11,11 @@
 // Shared (VERSUS and PARTY): one instance on the whole screen (128 x screen_h),
 //   players = mask of who plays, update gets the whole input array.
 //
-// Games call fx_burst() for effects, main draws a dim ambient background
-// before draw(), so leave the background black (don't clear it).
+// DEMO (attract show): players = 0, versus = false, view as in 1 PLAYER. The
+//   game plays itself (AI), input is ignored. Only games in the show need it
+//   (pong, tetris, pacman).
+//
+// Games call fx_burst() for effects. The background is black, don't clear it.
 #pragma once
 
 #include <stdbool.h>
@@ -54,3 +57,4 @@ extern const game_t game_pong;
 extern const game_t game_dk;
 extern const game_t game_mario;
 extern const game_t game_tanks;
+extern const game_t game_pacman;

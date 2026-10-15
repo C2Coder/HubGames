@@ -79,3 +79,8 @@ Tick timing: `update` runs every 20 ms. Order per tick: input (rotate/hard drop 
 - VERSUS 2-4 players: all drawing uses `v.x`/`v.y`, tag is `P<player+1>` in `player_color[player]`. Seed is redrawn when an instance is inited with a player number <= the previous one (start of a new game), so it works for any player set.
 - Text columns sit on black panels, the well is black, so the ambient background shows only in the gaps.
 - Effects: `fx_burst` sparkles along each cleared row (row colours), small burst under the piece on hard drop, explosion over the board on game over.
+
+## Ghost and demo
+
+- Ghost: the hard drop position of the active piece is drawn under it in the piece colour at 25% brightness (`dim()`). Not shown during line-clear flash or death.
+- Demo (attract show): `init` with `players == 0` sets `demo`, player is treated as 0, the input pointer is never read. On every spawn `ai_plan` tries every rotation x column (straight drop) and scores the board with aggregate height -0.51, lines +0.76, holes -0.36, bumpiness -0.18. `ai_input` then builds a fake `input_t` for the normal update path: one action per 4 ticks (rotate, then one step sideways, then hard drop), so rules, levels and scoring are unchanged. A blocked rotation or move drops the plan to the current state. Ends with `GAME_OVER` when it tops out.

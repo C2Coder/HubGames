@@ -13,6 +13,7 @@
 #define LOCK_RESETS 8
 #define FLASH_TICKS 15
 #define DEATH_TICKS 60
+#define AI_STEP     4 // demo: ticks between AI moves
 
 // base shapes as 4x4 bitmasks (bit = row * 4 + col), piece ids 0..6
 static const uint16_t shape[7] = {0x00F0, 0x0066, 0x0072, 0x0036, 0x0063, 0x0071, 0x0074};
@@ -31,7 +32,7 @@ static int last_player = 99;
 typedef struct {
     view_t v;
     int player;
-    bool versus, wide;
+    bool versus, wide, demo;
     uint8_t board[ROWS][COLS]; // 0 empty, else colour index 1..7
     uint8_t bag[7];
     int bag_i;
@@ -45,6 +46,7 @@ typedef struct {
     int score, lines, level;
     uint32_t rng;
     int bx, by; // board origin
+    int ai_x, ai_rot, ai_t; // demo: target column and rotation, move timer
 } tetris_t;
 
 _Static_assert(sizeof(tetris_t) <= GAME_STATE_MAX, "tetris state too big");
@@ -106,6 +108,72 @@ static bool collides(const tetris_t *s, uint16_t m, int px, int py)
     return false;
 }
 
+// row the current piece would land on
+static int land_y(const tetris_t *s)
+{
+    int y = s->y;
+    while (!collides(s, s->mask, s->x, y + 1))
+        y++;
+    return y;
+}
+
+// piece colour at about 25% brightness
+static uint16_t dim(uint16_t c)
+{
+    return (((c >> 11) >> 2) << 11) | ((((c >> 5) & 63) >> 2) << 5) | ((c & 31) >> 2);
+}
+
+// demo AI: try every rotation x column, drop straight down, score the board
+static void ai_plan(tetris_t *s)
+{
+    float best = -1e9f;
+    s->ai_x = s->x;
+    s->ai_rot = 0;
+    for (int r = 0; r < 4; r++) {
+        uint16_t m = rotated(s->id, r);
+        for (int x = -3; x < COLS; x++) {
+            if (collides(s, m, x, 0))
+                continue;
+            int y = 0;
+            while (!collides(s, m, x, y + 1))
+                y++;
+            uint8_t b[ROWS][COLS];
+            memcpy(b, s->board, sizeof(b));
+            for (int i = 0; i < 16; i++)
+                if ((m & (1 << i)) && y + (i >> 2) >= 0)
+                    b[y + (i >> 2)][x + (i & 3)] = 1;
+            int lines = 0;
+            for (int cy = 0; cy < ROWS; cy++) {
+                int n = 0;
+                for (int cx = 0; cx < COLS; cx++)
+                    n += b[cy][cx] != 0;
+                lines += n == COLS;
+            }
+            int height = 0, holes = 0, bump = 0, prev = 0;
+            for (int cx = 0; cx < COLS; cx++) {
+                int h = 0;
+                for (int cy = 0; cy < ROWS; cy++) {
+                    if (b[cy][cx]) {
+                        if (!h)
+                            h = ROWS - cy;
+                    } else if (h)
+                        holes++;
+                }
+                height += h;
+                if (cx)
+                    bump += h > prev ? h - prev : prev - h;
+                prev = h;
+            }
+            float sc = -0.51f * height + 0.76f * lines - 0.36f * holes - 0.18f * bump;
+            if (sc > best) {
+                best = sc;
+                s->ai_x = x;
+                s->ai_rot = r;
+            }
+        }
+    }
+}
+
 static void spawn(tetris_t *s)
 {
     s->id = s->next;
@@ -114,13 +182,14 @@ static void spawn(tetris_t *s)
     s->x = 3;
     s->y = 0;
     s->mask = rotated(s->id, 0);
-    s->g_t = s->lock_t = s->resets = s->sd_t = 0;
+    s->g_t = s->lock_t = s->resets = s->sd_t = s->ai_t = 0;
     if (collides(s, s->mask, s->x, s->y)) {
         s->dead = true;
         // explosion over the board
         for (int i = 0; i < 6; i++)
             fx_burst(s->bx + (i % 3) * 15 + 3, s->by + (i / 3) * 30 + 15, i % 2 ? C_RED : C_YELLOW, 14);
-    }
+    } else if (s->demo)
+        ai_plan(s);
 }
 
 static void init(void *p, view_t v, uint8_t players, bool versus)
@@ -128,7 +197,8 @@ static void init(void *p, view_t v, uint8_t players, bool versus)
     tetris_t *s = p;
     memset(s, 0, sizeof(*s));
     s->v = v;
-    s->player = __builtin_ctz(players);
+    s->demo = players == 0;
+    s->player = s->demo ? 0 : __builtin_ctz(players);
     s->versus = versus;
     s->wide = v.w >= 128;
     if (s->player <= last_player) // first instance of a new game
@@ -173,6 +243,26 @@ static void try_rotate(tetris_t *s)
         s->x += kick[i];
         moved(s);
         return;
+    }
+}
+
+// demo AI input: rotate, then step sideways, then hard drop, one action per AI_STEP ticks
+static void ai_input(tetris_t *s, input_t *in)
+{
+    memset(in, 0, sizeof(*in));
+    if (++s->ai_t < AI_STEP)
+        return;
+    s->ai_t = 0;
+    if (s->rot != s->ai_rot) {
+        int r = s->rot;
+        try_rotate(s);
+        if (s->rot == r) // blocked, give up on this rotation
+            s->ai_rot = r;
+    } else if (s->x != s->ai_x) {
+        if (!try_move(s, s->ai_x > s->x ? 1 : -1))
+            s->ai_x = s->x;
+    } else {
+        in->pressed = BTN_B;
     }
 }
 
@@ -235,6 +325,13 @@ static game_status_t update(void *p, const input_t *in)
         if (--s->flash_t == 0)
             finish_clear(s);
         return GAME_RUNNING;
+    }
+
+    input_t ai;
+    if (s->demo) { // ignore the real input
+        ai_input(s, &ai);
+        ai.held = ai.pressed;
+        in = &ai;
     }
 
     // horizontal move with auto-repeat
@@ -335,6 +432,13 @@ static void draw(const void *p)
         }
     }
     if (!s->dead && !s->flash_t) {
+        int gy = land_y(s);
+        for (int i = 0; i < 16; i++) // ghost under the piece
+            if (s->mask & (1 << i)) {
+                int cy = gy + (i >> 2);
+                if (cy >= 0)
+                    cell(s->bx, s->by, s->x + (i & 3), cy, dim(col[s->id + 1]));
+            }
         for (int i = 0; i < 16; i++)
             if (s->mask & (1 << i)) {
                 int cy = s->y + (i >> 2);

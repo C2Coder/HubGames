@@ -6,28 +6,30 @@
 <title>Mecha Arcade</title>
 <style>
 * { box-sizing: border-box; margin: 0; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+:root { --u: min(1vh, 0.6vw); }
 html, body { height: 100%; background: #111; color: #eee; font-family: sans-serif; overflow: hidden; touch-action: none; }
-#bar { position: absolute; top: 0; left: 0; right: 0; height: 16vh; display: flex; align-items: center; justify-content: center; gap: 6vw; z-index: 1; }
-#who { font-size: 8vh; font-weight: bold; color: #888; min-width: 26vw; text-align: center; }
-.t { height: 9vh; padding: 0 3vh; border-radius: 5vh; background: #333; display: flex; align-items: center; justify-content: center; font-size: 4.5vh; color: #aaa; }
+#bar { position: absolute; top: 0; left: 0; right: 0; height: calc(16 * var(--u)); display: flex; align-items: center; justify-content: center; gap: 6vw; z-index: 1; }
+#who { font-size: calc(8 * var(--u)); font-weight: bold; color: #888; min-width: 26vw; text-align: center; }
+.t { height: calc(9 * var(--u)); padding: 0 calc(3 * var(--u)); border-radius: calc(5 * var(--u)); background: #333; display: flex; align-items: center; justify-content: center; font-size: calc(4.5 * var(--u)); color: #aaa; }
 #pad { height: 100vh; display: flex; }
-#left, #right { flex: 1; display: flex; align-items: center; justify-content: center; padding-top: 10vh; }
-#left { justify-content: flex-start; padding-left: 5vh; }
-#joy { width: 52vh; height: 52vh; border-radius: 50%; background: #222; border: 0.5vh solid #444; position: relative; }
-#knob { width: 22vh; height: 22vh; border-radius: 50%; background: #666; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
-#dpad { display: grid; grid-template-columns: repeat(3, 19vh); grid-template-rows: repeat(3, 19vh); gap: 1.5vh; }
-.k { background: #333; border-radius: 2.5vh; display: flex; align-items: center; justify-content: center; font-size: 8vh; color: #aaa; }
+#left, #right { flex: 1; display: flex; align-items: center; padding-top: calc(10 * var(--u)); }
+#left { justify-content: flex-start; padding-left: calc(5 * var(--u)); }
+#right { justify-content: flex-end; padding-right: calc(5 * var(--u)); }
+#joy { width: calc(52 * var(--u)); height: calc(52 * var(--u)); border-radius: 50%; background: #222; border: calc(0.5 * var(--u)) solid #444; position: relative; }
+#knob { width: calc(22 * var(--u)); height: calc(22 * var(--u)); border-radius: 50%; background: #666; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+#dpad { display: grid; grid-template-columns: repeat(3, calc(19 * var(--u))); grid-template-rows: repeat(3, calc(19 * var(--u))); gap: calc(1.5 * var(--u)); }
+.k { background: #333; border-radius: calc(2.5 * var(--u)); display: flex; align-items: center; justify-content: center; font-size: calc(8 * var(--u)); color: #aaa; }
 .on { filter: brightness(1.8); }
 .hide { display: none !important; }
-#ab { position: relative; width: 50vh; height: 50vh; }
-.r { position: absolute; width: 23vh; height: 23vh; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9vh; font-weight: bold; color: #fff; }
-#a { right: 0; top: 2vh; background: #b22; }
-#b { left: 0; bottom: 2vh; background: #c80; }
-#doompad { display: grid; grid-template-columns: 25vh 25vh; gap: 1.5vh; justify-items: center; align-items: center; transform: translateY(-7vh); }
-#fire { grid-column: 1 / 3; width: 24vh; height: 24vh; border-radius: 50%; background: #b22; color: #fff; font-size: 6vh; font-weight: bold; }
-#use { grid-column: 1 / 3; width: 30vh; height: 11vh; background: #c80; color: #fff; font-size: 5vh; }
-.turn { width: 25vh; height: 25vh; }
-#hint { position: absolute; left: 0; right: 0; bottom: 2vh; text-align: center; font-size: 5vh; color: #ccc; pointer-events: none; }
+#ab { position: relative; width: calc(50 * var(--u)); height: calc(50 * var(--u)); }
+.r { position: absolute; width: calc(23 * var(--u)); height: calc(23 * var(--u)); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: calc(9 * var(--u)); font-weight: bold; color: #fff; }
+#a { right: 0; top: calc(2 * var(--u)); background: #b22; }
+#b { left: 0; bottom: calc(2 * var(--u)); background: #c80; }
+#doompad { display: grid; grid-template-columns: calc(25 * var(--u)) calc(25 * var(--u)); gap: calc(1.5 * var(--u)); justify-items: center; align-items: center; transform: translateY(calc(-7 * var(--u))); }
+#fire { grid-column: 1 / 3; width: calc(24 * var(--u)); height: calc(24 * var(--u)); border-radius: 50%; background: #b22; color: #fff; font-size: calc(6 * var(--u)); font-weight: bold; }
+#use { grid-column: 1 / 3; width: calc(30 * var(--u)); height: calc(11 * var(--u)); background: #c80; color: #fff; font-size: calc(5 * var(--u)); }
+.turn { width: calc(25 * var(--u)); height: calc(25 * var(--u)); }
+#hint { position: absolute; left: 0; right: 0; bottom: calc(2 * var(--u)); text-align: center; font-size: calc(5 * var(--u)); color: #ccc; pointer-events: none; }
 #rot { display: none; height: 100%; align-items: center; justify-content: center; font-size: 6vw; color: #888; }
 @media (orientation: portrait) { #rot { display: flex; } #bar, #pad { display: none; } }
 </style>
@@ -75,6 +77,7 @@ const GAME_HINTS = {
   14: '\u25C0 \u25B6 walk \u00B7 \u25B2 \u25BC ladders \u00B7 A jump barrels',
   15: '\u25C0 \u25B6 move \u00B7 A jump \u00B7 B run',
   16: 'Drive \u00B7 A fire (bullets bounce off walls)',
+  18: 'Eat all dots, avoid ghosts \u00B7 big dots make them edible',
   17: 'Stick move \u00B7 \u25C0 \u25B6 turn \u00B7 FIRE \u00B7 USE opens doors',
 };
 let player = -1, ctx = 0;
