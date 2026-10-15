@@ -13,7 +13,7 @@
 #define LOCK_RESETS 8
 #define FLASH_TICKS 15
 #define DEATH_TICKS 60
-#define AI_STEP     4 // demo: ticks between AI moves
+#define AI_STEP     10 // demo: ticks between AI moves
 
 // base shapes as 4x4 bitmasks (bit = row * 4 + col), piece ids 0..6
 static const uint16_t shape[7] = {0x00F0, 0x0066, 0x0072, 0x0036, 0x0063, 0x0071, 0x0074};
@@ -246,10 +246,15 @@ static void try_rotate(tetris_t *s)
     }
 }
 
-// demo AI input: rotate, then step sideways, then hard drop, one action per AI_STEP ticks
+// demo AI input: rotate, then step sideways, one action per AI_STEP ticks,
+// then soft drop
 static void ai_input(tetris_t *s, input_t *in)
 {
     memset(in, 0, sizeof(*in));
+    if (s->rot == s->ai_rot && s->x == s->ai_x) {
+        in->held = BTN_DOWN;
+        return;
+    }
     if (++s->ai_t < AI_STEP)
         return;
     s->ai_t = 0;
@@ -258,11 +263,8 @@ static void ai_input(tetris_t *s, input_t *in)
         try_rotate(s);
         if (s->rot == r) // blocked, give up on this rotation
             s->ai_rot = r;
-    } else if (s->x != s->ai_x) {
-        if (!try_move(s, s->ai_x > s->x ? 1 : -1))
-            s->ai_x = s->x;
-    } else {
-        in->pressed = BTN_B;
+    } else if (!try_move(s, s->ai_x > s->x ? 1 : -1)) {
+        s->ai_x = s->x;
     }
 }
 

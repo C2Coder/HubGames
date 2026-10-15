@@ -85,6 +85,7 @@ static input_t in[MAX_PLAYERS];
 static int show_cur;               // what the show plays now, SHOW_ANIM..
 static uint32_t show_t, show_last; // frames since show_cur started, t of the last show frame
 static bool demo_scaled;
+static bool show_auto; // S_AMBIENT plays set_show, else only the animations (idle)
 static EXT_RAM_BSS_ATTR uint8_t demo_gs[GAME_STATE_MAX] __attribute__((aligned(4)));
 
 static void start_game(void);
@@ -417,11 +418,13 @@ static void show_start(int item)
     g->init(demo_gs, v, 0, false);
 }
 
-// one frame of the attract show, starts over when it didn't run last frame
+// one frame of the attract show, starts over when it didn't run last frame.
+// Games play themselves only after picking them in the SHOW menu.
 static void show_frame(void)
 {
+    int sel = state == S_AMBIENT && show_auto ? set_show : SHOW_ANIM;
     if (show_last + 1 != t)
-        show_start(set_show == SHOW_MIX ? SHOW_ANIM : set_show);
+        show_start(sel == SHOW_MIX ? SHOW_ANIM : sel);
     show_last = t;
 
     const game_t *g = show_game[show_cur];
@@ -429,7 +432,7 @@ static void show_frame(void)
     if (!g) {
         ambient_show(show_t);
         join_overlay();
-        done = set_show == SHOW_MIX && show_t + 1 >= AMBIENT_CYCLE;
+        done = sel == SHOW_MIX && show_t + 1 >= AMBIENT_CYCLE;
     } else {
         done = g->update(demo_gs, in) != GAME_RUNNING || show_t >= DEMO_TICKS;
         g->draw(demo_gs);
@@ -439,13 +442,14 @@ static void show_frame(void)
     }
     show_t++;
     if (done)
-        show_start(set_show != SHOW_MIX ? set_show : show_cur + 1 < SHOW_N ? show_cur + 1 : SHOW_ANIM);
+        show_start(sel != SHOW_MIX ? sel : show_cur + 1 < SHOW_N ? show_cur + 1 : SHOW_ANIM);
 }
 
 static void ambient_mode(void)
 {
     if (pressed_any(0xf)) {
         fx_clear();
+        show_auto = false;
         set_state(S_MAIN);
         return;
     }
@@ -466,6 +470,7 @@ static void show_menu(void)
     if (in[0].pressed & BTN_A) {
         set_show = show_sel;
         settings_save();
+        show_auto = true;
         set_state(S_AMBIENT);
         return;
     }
@@ -759,6 +764,7 @@ static void idle_return(void)
                      state == S_PAUSE || (state == S_MAIN && in[0].connected);
     if (menu_like && ++idle_t > IDLE_TICKS) {
         idle_t = 0;
+        show_auto = false;
         set_state(S_AMBIENT);
     }
 }
